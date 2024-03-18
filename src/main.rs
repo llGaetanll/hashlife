@@ -1,6 +1,7 @@
 use crate::quadtree::{Point, QuadTree};
 
 mod quadtree;
+mod qt;
 
 fn main() {
     let points = vec![
