@@ -1,3 +1,5 @@
+use crate::cell::CellHash;
+use crate::cell::LEAF_MASK;
 use crate::rules::RuleSet;
 use crate::rules::RuleSetError;
 
@@ -72,7 +74,7 @@ impl World {
         self.buf = buf;
     }
 
-    fn copy_children(&self, index: CellIndex, buf: &mut [Cell]) {
+    fn copy_children(&self, index: usize, buf: &mut [Cell]) {
         let n = buf.len();
 
         let cell = self.buf[index];
