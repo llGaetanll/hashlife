@@ -1,17 +1,3 @@
-pub type CellHash = usize;
-
-/// A Cell hashes to its result. The hash should be extremely quick to perform
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub struct Cell {
-    pub nw: CellHash,
-    pub ne: CellHash,
-    pub sw: CellHash,
-    pub se: CellHash,
-
-    /// The index of the result of a [`Cell`]
-    pub res: CellHash
-}
-
 /// On 64 bit machines: 1 followed by 63 0s, `9_223_372_036_854_775_808`.
 /// On 32 bit machines: 1 followed by 31 0s, `2_147_483_648`.
 ///
@@ -19,7 +5,7 @@ pub struct Cell {
 /// entries. Under this assumption, we can use the most significant bit of our `nw` index to
 /// indicate whether the current cell is a leaf. This keeps the structure small, and the routine
 /// fast.
-const LEAF_MASK: usize = {
+pub const LEAF_MASK: usize = {
     const WORD_SIZE_BITS: usize = std::mem::size_of::<usize>() * 8;
 
     1usize << (WORD_SIZE_BITS - 1)
@@ -27,6 +13,24 @@ const LEAF_MASK: usize = {
 
 /// If we see a leading bit on `res`, that means the result is not computed
 const RES_UNSET_MASK: usize = LEAF_MASK;
+
+/// A `CellHash` is either an index into a list of `Cell`s, or a leaf cell
+pub type CellHash = usize;
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub struct Cell {
+    pub nw: CellHash,
+    pub ne: CellHash,
+    pub sw: CellHash,
+    pub se: CellHash,
+
+    /// The index of the result of a [`Cell`].
+    ///
+    /// The result of a 2^n cell is a pointer to a 2^{n - 1} cell,
+    /// specifically it's what this cell will look like in 2^{n - 2}
+    /// iterations.
+    pub res: CellHash,
+}
 
 impl Cell {
     /// Return the canonical "empty" cell
@@ -36,7 +40,7 @@ impl Cell {
             ne: 0,
             sw: 0,
             se: 0,
-            res: RES_UNSET_MASK
+            res: RES_UNSET_MASK,
         }
     }
 
@@ -47,7 +51,7 @@ impl Cell {
             ne: 0,
             sw: 0,
             se: 0,
-            res: RES_UNSET_MASK
+            res: RES_UNSET_MASK,
         }
     }
 
@@ -83,7 +87,7 @@ impl Cell {
         self.nw & LEAF_MASK == LEAF_MASK
     }
 
-    fn children(&self) -> Option<[usize; 4]> {
+    pub fn children(&self) -> Option<[usize; 4]> {
         if self.is_leaf() {
             None
         } else {
@@ -100,7 +104,8 @@ impl Cell {
         }
     }
 
-    /// 
+    /// For a leaf cell, this computes its result.
+    ///
     ///   t00 t01 t02
     ///   t10 t11 t12
     ///   t20 t21 t22
@@ -113,25 +118,25 @@ impl Cell {
             let t00 = self.nw as u16 & 0b0000_0110_0110_0000;
 
             let t01 = ((self.nw as u16 & 0b0000_0001_0001_0000) << 2)
-                    & ((self.ne as u16 & 0b0000_1000_1000_0000) >> 2);
+                & ((self.ne as u16 & 0b0000_1000_1000_0000) >> 2);
 
             let t02 = self.ne as u16 & 0b0000_0110_0110_0000;
 
             let t10 = ((self.nw as u16 & 0b0000_0000_0000_0110) << 8)
-                    & ((self.sw as u16 & 0b0110_0000_0000_0000) >> 8);
+                & ((self.sw as u16 & 0b0110_0000_0000_0000) >> 8);
 
             let t11 = ((self.nw as u16 & 0b0000_0000_0000_0001) << 10)
-                    & ((self.ne as u16 & 0b0000_0000_0000_1000) << 6)
-                    & ((self.sw as u16 & 0b0001_0000_0000_0000) >> 6)
-                    & ((self.se as u16 & 0b1000_0000_0000_0000) >> 10);
+                & ((self.ne as u16 & 0b0000_0000_0000_1000) << 6)
+                & ((self.sw as u16 & 0b0001_0000_0000_0000) >> 6)
+                & ((self.se as u16 & 0b1000_0000_0000_0000) >> 10);
 
             let t12 = ((self.ne as u16 & 0b0000_0000_0000_0110) << 8)
-                    & ((self.se as u16 & 0b0110_0000_0000_0000) >> 8);
+                & ((self.se as u16 & 0b0110_0000_0000_0000) >> 8);
 
             let t20 = self.sw as u16 & 0b0000_0110_0110_0000;
 
             let t21 = ((self.sw as u16 & 0b0000_0001_0001_0000) << 2)
-                    & ((self.se as u16 & 0b0000_1000_1000_0000) >> 2);
+                & ((self.se as u16 & 0b0000_1000_1000_0000) >> 2);
 
             let t22 = self.se as u16 & 0b0000_0110_0110_0000;
 
@@ -141,9 +146,9 @@ impl Cell {
             let br = (t11 << 5) & (t12 << 3) & (t21 >> 1) & (t22 >> 5);
 
             let _ = (next[tl as usize] << 5)
-                  & (next[tr as usize] << 3)
-                  & (next[bl as usize] >> 1)
-                  & (next[br as usize] >> 5);
+                & (next[tr as usize] << 3)
+                & (next[bl as usize] >> 1)
+                & (next[br as usize] >> 5);
         }
         self.mask_leaf();
     }
@@ -163,8 +168,6 @@ impl Cell {
         let n20 = cell_utils::center(buf[self.sw], buf);
         let n21 = cell_utils::h_center(buf[self.sw], buf[self.se], buf);
         let n22 = cell_utils::center(buf[self.se], buf);
-
-
 
         todo!()
     }
@@ -205,61 +208,64 @@ impl Cell {
     }
 }
 
+/// TODO: On all of these below, gracefully handle any cases where indexing into buf may resolve to
+/// `Cell::unset()`.
 mod cell_utils {
     use super::Cell;
+    use super::RES_UNSET_MASK;
 
-    pub fn find_cell(nw: usize, ne: usize, sw: usize, se: usize, buf: &[Cell]) -> usize {
-        // Houston, we have a problem.
-        //
-        // Hashing a cell produces its result. What we want here is to return the index of a cell
-        // in `buf`, whose quandrants are identical those passed in.
-
-        todo!()
-    }
+    // pub fn find_cell(nw: usize, ne: usize, sw: usize, se: usize, buf: &[Cell]) -> usize {
+    //     // Houston, we have a problem.
+    //     //
+    //     // Hashing a cell produces its result. What we want here is to return the index of a cell
+    //     // in `buf`, whose quandrants are identical those passed in.
+    //
+    //     todo!()
+    // }
 
     /// Given an n-cell, returns the n/2 cell at its center
-    /// TODO: Gracefully handle any cases where indexing into buf may resolve to `Cell::unset()` 
     pub fn center(c: Cell, buf: &[Cell]) -> Cell {
         Cell {
             nw: buf[c.nw].se,
             ne: buf[c.ne].sw,
             sw: buf[c.sw].ne,
             se: buf[c.se].nw,
+            res: RES_UNSET_MASK,
         }
     }
 
-    /// Given two n-cells with `w` to the left and `s` to the right, this returns the n/2 cell centered
+    /// Given two n-cells with `w` to the left and `e` to the right, this returns the n/2 cell centered
     /// on their boundary
-    /// TODO: Gracefully handle any cases where indexing into buf may resolve to `Cell::unset()` 
     pub fn h_center(w: Cell, e: Cell, buf: &[Cell]) -> Cell {
         Cell {
             nw: buf[w.ne].se,
             ne: buf[e.nw].sw,
             sw: buf[w.se].ne,
             se: buf[e.sw].nw,
+            res: RES_UNSET_MASK,
         }
     }
 
     /// Given two n-cells with `n` above and `s` below, this returns the n/2 cell centered on their
     /// boundary
-    /// TODO: Gracefully handle any cases where indexing into buf may resolve to `Cell::unset()` 
     pub fn v_center(n: Cell, s: Cell, buf: &[Cell]) -> Cell {
         Cell {
             nw: buf[n.sw].se,
             ne: buf[n.se].sw,
             sw: buf[s.nw].ne,
             se: buf[s.ne].nw,
+            res: RES_UNSET_MASK,
         }
     }
 
     /// On an n-cell, this is its n/4 center
-    /// TODO: Gracefully handle any cases where indexing into buf may resolve to `Cell::unset()` 
     pub fn super_center(cell: Cell, buf: &[Cell]) -> Cell {
         Cell {
             nw: buf[buf[cell.nw].se].se,
             ne: buf[buf[cell.ne].sw].sw,
             sw: buf[buf[cell.sw].ne].ne,
-            se: buf[buf[cell.se].nw].nw
+            se: buf[buf[cell.se].nw].nw,
+            res: RES_UNSET_MASK,
         }
     }
 }
