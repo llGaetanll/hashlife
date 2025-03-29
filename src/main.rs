@@ -1,14 +1,20 @@
-mod rules;
 mod cell;
+mod rules;
 mod world;
+mod render;
 
 use cell::Cell;
 use cell::CellHash;
 
 struct CellBuf {
+    /// The index of the root cell in `buf`
     root: usize,
+
+    /// The list of all cells. This is where all of the memory allocated by the program goes
     buf: Vec<Cell>,
-    size: usize
+
+    /// The size of the world where n means a world sidelength of 2^n
+    size: usize,
 }
 
 const C1: usize = 1;
@@ -19,7 +25,7 @@ impl CellBuf {
         Self {
             root: 0,
             buf: vec![Cell::unset(); next_prime(10_000)],
-            size: 0
+            size: 0,
         }
     }
 
@@ -73,7 +79,7 @@ impl CellBuf {
 
             if buf[index] == Cell::unset() {
                 buf[index] = cell;
-                return index
+                return index;
             }
         }
 
@@ -110,6 +116,4 @@ fn next_prime(mut n: usize) -> usize {
 const LIFE_RULES: &str = "b3s23";
 const DEPTH: u8 = 5;
 
-fn main() {
-
-}
+fn main() {}
