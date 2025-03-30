@@ -124,8 +124,19 @@ fn next_prime(mut n: usize) -> usize {
 const LIFE_RULES: &str = "b3s23";
 const DEPTH: u8 = 0;
 
-// Makes the smallest possible cell, 8 on a side
-fn make_a_cell() -> Cell {
+/// Build this leaf cell:
+///
+///    00000000
+///    00000000
+///    00111100
+///    00111100
+///    00111100
+///    00111100
+///    00000000
+///    00000000
+///
+///
+fn build_leaf_cell() -> Cell {
     Cell {
         nw: 0b0000_0000_0011_0011 | LEAF_MASK,
         ne: 0b0000_0000_1100_1100,
@@ -135,14 +146,28 @@ fn make_a_cell() -> Cell {
     }
 }
 
-/// Assumes the cell is a leaf (hence the leaf mask)
-fn draw_cell(cam: &mut Camera, cell: Cell) {
-    let Cell { nw, ne, sw, se, .. } = cell;
+fn build_cell(cells: &mut [Cell]) -> Cell {
+    let nw = build_leaf_cell();
+    let ne = build_leaf_cell();
+    let sw = build_leaf_cell();
+    let se = build_leaf_cell();
 
-    draw_rule(cam, (nw - LEAF_MASK) as u16, 0, 0);
-    draw_rule(cam, ne as u16, 4, 0);
-    draw_rule(cam, sw as u16, 0, 4);
-    draw_rule(cam, se as u16, 4, 4);
+    cells[1] = nw;
+    cells[2] = ne;
+    cells[3] = sw;
+    cells[4] = se;
+
+    let cell = Cell {
+        nw: 1,
+        ne: 2,
+        sw: 3,
+        se: 4,
+        res: RES_UNSET_MASK,
+    };
+
+    cells[0] = cell;
+
+    cell
 }
 
 fn draw_rule(cam: &mut Camera, rule: u16, dx: usize, dy: usize) {
@@ -164,25 +189,50 @@ fn draw_rule(cam: &mut Camera, rule: u16, dx: usize, dy: usize) {
     }
 }
 
+/// Assumes the cell is a leaf (hence the leaf mask)
+fn draw_leaf_cell(cam: &mut Camera, mut cell: Cell, dx: usize, dy: usize) {
+    assert!(cell.is_leaf());
+
+    cell.unmask_leaf();
+    {
+        let Cell { nw, ne, sw, se, .. } = cell;
+
+        draw_rule(cam, nw as u16, dx, dy);
+        draw_rule(cam, ne as u16, dx + 4, dy);
+        draw_rule(cam, sw as u16, dx, dy + 4);
+        draw_rule(cam, se as u16, dx + 4, dy + 4);
+    }
+    cell.mask_leaf();
+}
+
+fn draw_cell(cam: &mut Camera, cell: Cell, cells: &[Cell], depth: u8, dx: usize, dy: usize) {
+    if cell.is_leaf() {
+        assert_eq!(depth, 0, "Wrong depth, expected 0, got {depth}");
+
+        draw_leaf_cell(cam, cell, dx, dy);
+    } else {
+        let Cell { nw, ne, sw, se, .. } = cell;
+
+        let d = 2usize.pow(2 + depth as u32);
+
+        let depth = depth - 1;
+
+        draw_cell(cam, cells[nw], cells, depth, dx, dy);
+        draw_cell(cam, cells[ne], cells, depth, dx + d, dy);
+        draw_cell(cam, cells[sw], cells, depth, dx, dy + d);
+        draw_cell(cam, cells[se], cells, depth, dx + d, dy + d);
+    }
+}
+
 fn main() {
     env_logger::init();
 
-    let cell = make_a_cell();
-
     let mut world = World::new(DEPTH, LIFE_RULES).unwrap();
-    world.buf[0] = cell;
 
-    let mut cam = Camera::new(8, 8);
-    draw_cell(&mut cam, cell);
-    let s = cam.render();
-    print!("{s}");
+    let cell = build_cell(&mut world.buf);
 
-    let res = world.next();
-
-    cam.reset();
-
-    draw_rule(&mut cam, res, 2, 2);
-
+    let mut cam = Camera::new(16, 16);
+    draw_cell(&mut cam, cell, &world.buf, 1, 0, 0);
     let s = cam.render();
     print!("{s}");
 }

@@ -59,19 +59,19 @@ impl Cell {
 
     /// For a cell of sidelength `2^k`, this returns a cell of sidelength `2^{k - 1}`, the result
     /// after `2^{k - 2}` iterations
-    pub fn next(&mut self, next: &[u16], buf: &[Cell]) -> u16{
+    pub fn next(&mut self, next: &[u16], buf: &[Cell]) -> u16 {
         self.compute_res(next, buf)
     }
 
     // WARNING: A leaf check would fail after this. It's
     // important to remask the leaf as early as possible.
-    fn unmask_leaf(&mut self) {
+    pub fn unmask_leaf(&mut self) {
         assert!(self.is_leaf());
 
         self.nw ^= LEAF_MASK;
     }
 
-    fn mask_leaf(&mut self) {
+    pub fn mask_leaf(&mut self) {
         // We mask leaves so that we have a way to differentiate between non-leaf cells and leaf
         // cells
         self.nw &= LEAF_MASK;

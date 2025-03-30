@@ -60,3 +60,11 @@ knowable cell is an `n - 2k` cell
     - [Archive Link](https://web.archive.org/web/20120719224016/http://www.drdobbs.com/jvm/an-algorithm-for-compressing-space-and-t/184406478)
 - [Hashlife Explained](https://web.archive.org/web/20220131050938/https://jennyhasahat.github.io/hashlife.html)
 - [Johnhw Hashlife](https://johnhw.github.io/hashlife/index.md.html)
+
+# TODO
+
+- [x] Make compute leaf code work
+- [x] Draw non-leaf node
+- [ ] Make compute node code work
+- [ ] `next()` should probably return a cell the same size at its input
+      Otherwise the world just keeps getting smaller
