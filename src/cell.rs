@@ -1,3 +1,5 @@
+use log::trace;
+
 /// On 64 bit machines: 1 followed by 63 0s, `9_223_372_036_854_775_808`.
 /// On 32 bit machines: 1 followed by 31 0s, `2_147_483_648`.
 ///
@@ -12,9 +14,9 @@ pub const LEAF_MASK: usize = {
 };
 
 /// If we see a leading bit on `res`, that means the result is not computed
-const RES_UNSET_MASK: usize = LEAF_MASK;
+pub const RES_UNSET_MASK: usize = LEAF_MASK;
 
-/// A `CellHash` is either an index into a list of `Cell`s, or a leaf cell
+/// A `CellHash` is either an index into a list of `Cell`s, or 4 cell stored directly as a u16
 pub type CellHash = usize;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -55,21 +57,14 @@ impl Cell {
         }
     }
 
-    fn next(&mut self, next: &[u16], buf: &[Cell]) -> Cell {
-        let index = self.hash() % buf.len();
-
-        // check if the result is in cache
-        if buf[index] != Cell::unset() {
-            let _ = buf[index];
-        } else {
-            self.compute_res(next, buf);
-        }
-
-        todo!()
+    /// For a cell of sidelength `2^k`, this returns a cell of sidelength `2^{k - 1}`, the result
+    /// after `2^{k - 2}` iterations
+    pub fn next(&mut self, next: &[u16], buf: &[Cell]) -> u16{
+        self.compute_res(next, buf)
     }
 
-    // WARNING: A leaf check would fail after this. It's important to remask the leaf as early as
-    // possible.
+    // WARNING: A leaf check would fail after this. It's
+    // important to remask the leaf as early as possible.
     fn unmask_leaf(&mut self) {
         assert!(self.is_leaf());
 
@@ -80,6 +75,20 @@ impl Cell {
         // We mask leaves so that we have a way to differentiate between non-leaf cells and leaf
         // cells
         self.nw &= LEAF_MASK;
+    }
+
+    /// A cell is a parent if it is not a leaf.
+    fn is_parent(&self) -> bool {
+        !self.is_leaf()
+    }
+
+    /// A cell is a grandparent if all of its children are parents
+    fn is_grandparent(&self, buf: &[Cell]) -> bool {
+        self.is_parent()
+            && buf[self.nw].is_parent()
+            && buf[self.ne].is_parent()
+            && buf[self.sw].is_parent()
+            && buf[self.se].is_parent()
     }
 
     /// Check if the cell is a leaf.
@@ -96,11 +105,13 @@ impl Cell {
     }
 
     /// Compute the result of a cell, in case the cache failed
-    fn compute_res(&mut self, next: &[u16], buf: &[Cell]) {
+    fn compute_res(&mut self, next: &[u16], buf: &[Cell]) -> u16 {
         if self.is_leaf() {
-            self.compute_leaf_res(next);
+            self.compute_leaf_res(next)
         } else {
             self.compute_node_res(buf);
+
+            0
         }
     }
 
@@ -110,47 +121,78 @@ impl Cell {
     ///   t10 t11 t12
     ///   t20 t21 t22
     ///
-    fn compute_leaf_res(&mut self, next: &[u16]) {
+    /// Remember that a leaf cell is composed entirely of u16s, each 4 squares on a side. This
+    /// makes leafs 8 cells, and their result 4 cells.
+    ///
+    /// Here, `next` is a ruleset array, where `next[rule] = result(rule)`
+    #[rustfmt::skip]
+    fn compute_leaf_res(&mut self, next: &[u16]) -> u16 {
         assert!(self.is_leaf());
+
+        let res;
 
         self.unmask_leaf();
         {
-            let t00 = self.nw as u16 & 0b0000_0110_0110_0000;
+            let t00 =   self.nw as u16 & 0b0000_0110_0110_0000;
 
             let t01 = ((self.nw as u16 & 0b0000_0001_0001_0000) << 2)
-                & ((self.ne as u16 & 0b0000_1000_1000_0000) >> 2);
+                    | ((self.ne as u16 & 0b0000_1000_1000_0000) >> 2);
 
-            let t02 = self.ne as u16 & 0b0000_0110_0110_0000;
+            let t02 =   self.ne as u16 & 0b0000_0110_0110_0000;
 
             let t10 = ((self.nw as u16 & 0b0000_0000_0000_0110) << 8)
-                & ((self.sw as u16 & 0b0110_0000_0000_0000) >> 8);
+                    | ((self.sw as u16 & 0b0110_0000_0000_0000) >> 8);
 
             let t11 = ((self.nw as u16 & 0b0000_0000_0000_0001) << 10)
-                & ((self.ne as u16 & 0b0000_0000_0000_1000) << 6)
-                & ((self.sw as u16 & 0b0001_0000_0000_0000) >> 6)
-                & ((self.se as u16 & 0b1000_0000_0000_0000) >> 10);
+                    | ((self.ne as u16 & 0b0000_0000_0000_1000) << 6)
+                    | ((self.sw as u16 & 0b0001_0000_0000_0000) >> 6)
+                    | ((self.se as u16 & 0b1000_0000_0000_0000) >> 10);
 
             let t12 = ((self.ne as u16 & 0b0000_0000_0000_0110) << 8)
-                & ((self.se as u16 & 0b0110_0000_0000_0000) >> 8);
+                    | ((self.se as u16 & 0b0110_0000_0000_0000) >> 8);
 
-            let t20 = self.sw as u16 & 0b0000_0110_0110_0000;
+            let t20 =   self.sw as u16 & 0b0000_0110_0110_0000;
 
             let t21 = ((self.sw as u16 & 0b0000_0001_0001_0000) << 2)
-                & ((self.se as u16 & 0b0000_1000_1000_0000) >> 2);
+                    | ((self.se as u16 & 0b0000_1000_1000_0000) >> 2);
 
             let t22 = self.se as u16 & 0b0000_0110_0110_0000;
 
-            let tl = (t00 << 5) & (t01 << 3) & (t10 >> 1) & (t11 >> 5);
-            let tr = (t01 << 5) & (t02 << 3) & (t11 >> 1) & (t12 >> 5);
-            let bl = (t10 << 5) & (t11 << 3) & (t20 >> 1) & (t21 >> 5);
-            let br = (t11 << 5) & (t12 << 3) & (t21 >> 1) & (t22 >> 5);
+            trace!("nw:  {:016b}", self.nw);
+            trace!("ne:  {:016b}", self.ne);
+            trace!("sw:  {:016b}", self.sw);
+            trace!("se:  {:016b}", self.se);
 
-            let _ = (next[tl as usize] << 5)
-                & (next[tr as usize] << 3)
-                & (next[bl as usize] >> 1)
-                & (next[br as usize] >> 5);
+            trace!("t00: {t00:016b}");
+            trace!("t01: {t01:016b}");
+            trace!("t02: {t02:016b}");
+            trace!("t10: {t10:016b}");
+            trace!("t11: {t11:016b}");
+            trace!("t12: {t12:016b}");
+            trace!("t20: {t20:016b}");
+            trace!("t21: {t21:016b}");
+            trace!("t22: {t22:016b}");
+
+            let tl = (t00 << 5) | (t01 << 3) | (t10 >> 3) | (t11 >> 5);
+            let tr = (t01 << 5) | (t02 << 3) | (t11 >> 3) | (t12 >> 5);
+            let bl = (t10 << 5) | (t11 << 3) | (t20 >> 3) | (t21 >> 5);
+            let br = (t11 << 5) | (t12 << 3) | (t21 >> 3) | (t22 >> 5);
+
+            trace!("tl:  {tl:016b}");
+            trace!("tr:  {tr:016b}");
+            trace!("bl:  {bl:016b}");
+            trace!("br:  {br:016b}");
+
+            res = (next[tl as usize] << 5)
+                | (next[tr as usize] << 3)
+                | (next[bl as usize] >> 3)
+                | (next[br as usize] >> 5);
+
+            trace!("res: {res:016b}");
         }
         self.mask_leaf();
+
+        res
     }
 
     fn compute_node_res(&self, buf: &[Cell]) -> (CellHash, Cell) {
@@ -258,7 +300,7 @@ mod cell_utils {
         }
     }
 
-    /// On an n-cell, this is its n/4 center
+    /// On an n > 16 cell, this is its n/4 center
     pub fn super_center(cell: Cell, buf: &[Cell]) -> Cell {
         Cell {
             nw: buf[buf[cell.nw].se].se,
@@ -267,5 +309,21 @@ mod cell_utils {
             se: buf[buf[cell.se].nw].nw,
             res: RES_UNSET_MASK,
         }
+    }
+
+    /// On a 16 cell, this is its 4x4 center
+    pub fn super_center_16(cell: Cell, buf: &[Cell]) -> u16 {
+        // These are rules, since the cell is not a grandparent
+        let nw = buf[cell.nw].se as u16;
+        let ne = buf[cell.ne].sw as u16;
+        let sw = buf[cell.sw].ne as u16;
+        let se = buf[cell.se].nw as u16;
+
+        let nw = nw & 0b0000_0000_0011_0011;
+        let ne = ne & 0b0000_0000_1100_1100;
+        let sw = sw & 0b0011_0011_0000_0000;
+        let se = se & 0b1100_1100_0000_0000;
+
+        (nw << 10) | (ne << 6) | (sw >> 6) | (se >> 10)
     }
 }
