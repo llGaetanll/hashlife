@@ -117,9 +117,14 @@ impl Camera {
         }
     }
 
+    /// Reset the cell buffer
+    pub fn reset(&mut self) {
+        self.cb.fill(false);
+    }
+
     /// Fundamentally, we have a framebuffer of every pixel on our screen, and we ask ourselves "Is
     /// this pixel on or off?". This will be the technique used for drawing the tree later on
-    fn render(&mut self) -> &str {
+    pub fn render(&mut self) -> &str {
         let bw = self.w.div_ceil(2);
 
         // compute new codepoints
