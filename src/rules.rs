@@ -42,10 +42,20 @@ pub struct RuleSet {
 }
 
 impl RuleSet {
+    /// Compute game rules for the current `RuleSet`.
+    ///
+    /// More specifically, this returns a list of all
+    /// possible 4x4 cells, each stored using the bits
+    /// of a `u16`. These will eventually become the
+    /// leaves in our world's quadtree.
+    ///
+    /// The array is built in a way that indexing into
+    /// it with a certain rule will return the result
+    /// of that rule.
     pub fn compute_rules(&self) -> Vec<u16> {
-        let mut rules = vec![0; u16::MAX as usize];
+        let mut rules = vec![0; (u16::MAX as usize) + 1];
 
-        for cell in 0..u16::MAX {
+        for cell in 0..=u16::MAX {
             rules[cell as usize] = self.next(cell);
         }
 

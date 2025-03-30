@@ -1,4 +1,56 @@
-Userful resources:
+# What is Hashlife
+
+Fundamentally, Hashlife is a program that takes as input a cellular automaton
+state, and returns "what happens next". What we mean by "next" here is exactly
+what makes Hashlife special. A simple program for Conway's game of life might
+take as input an array of cells, and compute the next state on that array. What
+makes Hashlife special is that it allows us to calculate many iterations into the
+future.
+
+# How does it work?
+
+There are two parts to Hashlife that make it clever. The first is how we store
+the cells, and the second is re-using computation (also known as caching). We'll
+get to caching a bit later but let's first talk about how the cells are stored.
+
+## How Hashlife stores the cells
+
+If you were to build a very simple prgram to compute Conway's game of life, it
+might seem natural to store the cells as a 2D array of boolean values. Cell `(x,
+y)` is alive if and only if `cells[x][y]` is `true`. Hashlife does not take this
+approach. Instead, Hashlife builds the world from increasingly large square
+cells. Start with a 1x1 cell (or a 1 cell), either dead or alive. Put 4 of
+these in a 2x2 square and you get a 2 cell. Put 4 of these in a square and you
+get a 4 cell, and so on... In Hashlife, the entire world is stored as a QuadTree
+of cells `2^k` on a side. To be more specific, a world that is `2^10 = 1024`
+cells on a side, can be decomposed as 4 cells `512` on a side. Each of those
+further decompose until we get back down to the 1 cell.
+
+(In practice, HashLife does not start at the 1 cell but often at the 4 cell.)
+
+## What makes Hashlife so efficient
+
+
+# Notes
+
+- on an `n` cell, if we want to figure out its state in `k` iterations, the largest
+knowable cell is an `n - 2k` cell
+
+- A 4x4 cell is called a "rule".
+- A leaf cell is size 8x8. It's composed of a `u16` rule in all 4 of its quadrants
+- Cells build up from the 8x8 as expected
+
+# Optimization Ideas/Questions
+
+*Benchmark, benchmark, benchmark!*
+
+- What's the max number of cells we could ever pack in an array? Knowing such an
+  upper bound could allow us to pack more info in 4 words
+- SIMD on `256` bit register fits a cell in memory, could make ops faster?
+- How likely is it that parallelization would help here?
+- Should we use a `HashMap` instead of effectively making our own?
+
+# Further reading
 - [Original Paper by Bill Gosper](https://usr.lmf.cnrs.fr/~jcf/m1/gol/gosper-84.pdf)
 - [Wikipedia](https://en.wikipedia.org/wiki/Hashlife)
 - [Life Wiki](https://conwaylife.com/wiki/HashLife#cite_note-trokicki20060401-3)
@@ -8,18 +60,3 @@ Userful resources:
     - [Archive Link](https://web.archive.org/web/20120719224016/http://www.drdobbs.com/jvm/an-algorithm-for-compressing-space-and-t/184406478)
 - [Hashlife Explained](https://web.archive.org/web/20220131050938/https://jennyhasahat.github.io/hashlife.html)
 - [Johnhw Hashlife](https://johnhw.github.io/hashlife/index.md.html)
-
-Notes
-
-- on an `n` cell, if we want to figure out its state in `k` iterations, the largest
-knowable cell is an `n - 2k` cell
-
-Optimization Ideas/Questions
-
-*Benchmark, benchmark, benchmark!*
-
-- What's the max number of cells we could ever pack in an array? Knowing such an
-  upper bound could allow us to pack more info in 4 words
-- SIMD on `256` bit register fits a cell in memory, could make ops faster?
-- How likely is it that parallelization would help here?
-- Should we use a `HashMap` instead of effectively making our own?

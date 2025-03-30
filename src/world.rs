@@ -5,23 +5,25 @@ use crate::rules::RuleSetError;
 
 use crate::cell::Cell;
 
-struct World {
+pub struct World {
     /// Life rules
-    rules: Vec<u16>,
+    ///
+    /// Indexing into this array with rule `r` yields the result of `r`.
+    pub rules: Vec<u16>,
 
     /// Index of the root [`Cell`] in `buf`
-    root: usize,
+    pub root: usize,
 
     /// Index of the void (empty) [`Cell`] in `buf`
-    void: usize,
+    pub void: usize,
 
     /// This is where all of our memory goes
-    buf: Vec<Cell>,
+    pub buf: Vec<Cell>,
 
-    /// World depth, where
-    /// - `0` is a leaf [`Cell`], (16x16 world size)
-    /// - `n > 0` is a world sidelength of `16^(n + 1)`
-    depth: u8,
+    /// World depth, where `0` is a leaf [`Cell`], (8x8 world size).
+    ///
+    /// In general, `n` yields a world sidelength of `2^(n + 3)`
+    pub depth: u8,
 }
 
 impl World {
@@ -44,6 +46,14 @@ impl World {
             buf,
             depth,
         })
+    }
+
+    pub fn next(&mut self) -> u16 {
+        // todo
+
+        let mut root_cell = self.buf[self.root];
+
+        root_cell.next(&self.rules, &self.buf)
     }
 
     /// Insert the cell at the given hash (turned into index)
