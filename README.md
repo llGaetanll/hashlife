@@ -66,5 +66,7 @@ knowable cell is an `n - 2k` cell
 - [x] Make compute leaf code work
 - [x] Draw non-leaf node
 - [x] Make compute node code work
-- [ ] `next()` should probably return a cell the same size at its input
-      Otherwise the world just keeps getting smaller
+- [ ] Add function to world to grow it by a factor of 2. The function should
+    also keep the old root centered at the origin
+- [ ] Make drawing worlds easier. The camera should probably take the world and
+  be able to draw it (allowing for movement down the line)
