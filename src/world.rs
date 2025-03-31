@@ -48,12 +48,14 @@ impl World {
         })
     }
 
-    pub fn next(&mut self) -> Cell {
-        // todo
+    pub fn next(&mut self) {
+        // The root is always last
+        let mut root = self.buf.pop().unwrap();
 
-        let mut root_cell = self.buf[self.root];
+        self.root = root.next(&self.rules, &mut self.buf);
+        self.depth -= 1;
 
-        root_cell.next(&self.rules, &self.buf)
+        self.grow(1);
     }
 
     /// Grows the world by a factor of 2^k, keeping the previous root at the origin
@@ -63,51 +65,8 @@ impl World {
         }
 
         // The root is always the last
-        let old_root = self.buf.pop().unwrap();
-
-        let mask = if self.depth == 0 { LEAF_MASK } else { 0 };
-
-        let nw = Cell {
-            nw: mask,
-            ne: 0,
-            sw: 0,
-            se: old_root.nw & !mask,
-        };
-
-        let ne = Cell {
-            nw: mask,
-            ne: 0,
-            sw: old_root.ne,
-            se: 0,
-        };
-
-        let sw = Cell {
-            nw: mask,
-            ne: old_root.sw,
-            sw: 0,
-            se: 0,
-        };
-
-        let se = Cell {
-            nw: old_root.se | mask,
-            ne: 0,
-            sw: 0,
-            se: 0,
-        };
-
-        let n = self.buf.len();
-
-        self.buf.push(nw);
-        self.buf.push(ne);
-        self.buf.push(sw);
-        self.buf.push(se);
-
-        let root = Cell {
-            nw: n,
-            ne: n + 1,
-            sw: n + 2,
-            se: n + 3,
-        };
+        let root = self.buf.pop().unwrap();
+        let root = root.grow(&mut self.buf);
 
         let n = self.buf.len();
 

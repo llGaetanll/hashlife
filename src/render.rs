@@ -102,6 +102,24 @@ impl Camera {
         self.cb[i] = true;
     }
 
+    pub fn draw_outline(&mut self) {
+        for x in 0..self.w {
+            let i = self.xy_from(x, 0);
+            let j = self.xy_from(x, self.h - 1);
+
+            self.cb[i] = true;
+            self.cb[j] = true;
+        }
+
+        for y in 0..self.h {
+            let i = self.xy_from(0, y);
+            let j = self.xy_from(self.w - 1, y);
+
+            self.cb[i] = true;
+            self.cb[j] = true;
+        }
+    }
+
     /// Turns on a square grid of pixels in the framebuffer
     pub fn draw_square(&mut self, x: usize, y: usize, s: usize) {
         assert!(x < self.w - s, "x is out of bounds");

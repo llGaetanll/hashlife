@@ -71,6 +71,6 @@ knowable cell is an `n - 2k` cell
 - [x] Make drawing worlds easier. The camera should probably take the world and
       be able to draw it (allowing for movement down the line)
       This is fine but now we can't draw the results of `compute_node_res*`.
-- [ ] Write `compute_node_res` for cells larger thanb 16
-- [ ] Make `compute_res` modify the world root. Be sure to grow the resulting
+- [x] Write `compute_node_res` for cells larger than 16
+- [x] Make `compute_res` modify the world root. Be sure to grow the resulting
       world back to the size it was before. Avoids the "shrinking world" problem
