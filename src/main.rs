@@ -3,13 +3,12 @@ mod render;
 mod rules;
 mod world;
 
-use std::u16;
-
 use cell::Cell;
 use cell::CellHash;
 use cell::LEAF_MASK;
 use cell::RES_UNSET_MASK;
 use render::Camera;
+use std::io::Write;
 use world::World;
 
 struct CellBuf {
@@ -120,6 +119,16 @@ fn next_prime(mut n: usize) -> usize {
     }
 }
 
+fn setup_logging() {
+    // Initialize the tracing subscriber with custom formatting
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_target(true) // Keep the target (module path)
+        .with_ansi(true) // Enable colors
+        .without_time()
+        .init();
+}
+
 // See: https://conwaylife.com/wiki/Rulestring
 const LIFE_RULES: &str = "b3s23";
 const DEPTH: u8 = 0;
@@ -136,7 +145,7 @@ const DEPTH: u8 = 0;
 ///    00000000
 ///
 ///
-fn build_leaf_cell() -> Cell {
+fn build_8_cell() -> Cell {
     Cell {
         nw: 0b0000_0000_0011_0011 | LEAF_MASK,
         ne: 0b0000_0000_1100_1100,
@@ -146,11 +155,21 @@ fn build_leaf_cell() -> Cell {
     }
 }
 
-fn build_cell(cells: &mut [Cell]) -> Cell {
-    let nw = build_leaf_cell();
-    let ne = build_leaf_cell();
-    let sw = build_leaf_cell();
-    let se = build_leaf_cell();
+fn build_full_8_cell() -> Cell {
+    Cell {
+        nw: u16::MAX as usize | LEAF_MASK,
+        ne: u16::MAX as usize,
+        sw: u16::MAX as usize,
+        se: u16::MAX as usize,
+        res: RES_UNSET_MASK,
+    }
+}
+
+fn build_16_cell(cells: &mut [Cell]) -> Cell {
+    let nw = build_8_cell();
+    let ne = build_8_cell();
+    let sw = build_8_cell();
+    let se = build_8_cell();
 
     cells[1] = nw;
     cells[2] = ne;
@@ -225,14 +244,50 @@ fn draw_cell(cam: &mut Camera, cell: Cell, cells: &[Cell], depth: u8, dx: usize,
 }
 
 fn main() {
-    env_logger::init();
+    setup_logging();
+
+    let mut cam = Camera::new(16, 16);
 
     let mut world = World::new(DEPTH, LIFE_RULES).unwrap();
 
-    let cell = build_cell(&mut world.buf);
+    let cell = build_16_cell(&mut world.buf);
 
-    let mut cam = Camera::new(16, 16);
     draw_cell(&mut cam, cell, &world.buf, 1, 0, 0);
     let s = cam.render();
     print!("{s}");
+
+    // cam.reset();
+    //
+    // let leaf = cell_utils::center16(cell, &world.buf);
+    // draw_leaf_cell(&mut cam, leaf, 4, 4);
+    // let s = cam.render();
+    // print!("{s}");
+    //
+    // cam.reset();
+    //
+    // let w = build_8_cell();
+    // let e = build_8_cell();
+    // let leaf = cell_utils::h_center16(w, e);
+    // draw_leaf_cell(&mut cam, leaf, 4, 4);
+    // let s = cam.render();
+    // print!("{s}");
+    //
+    // cam.reset();
+    //
+    // let n = build_8_cell();
+    // let s = build_8_cell();
+    // let leaf = cell_utils::v_center16(n, s);
+    // draw_leaf_cell(&mut cam, leaf, 4, 4);
+    // let s = cam.render();
+    // print!("{s}");
+    //
+    // cam.reset();
+    //
+    // let cell = build_16_cell(&mut world.buf);
+    // let rule = cell_utils::super_center16(cell, &world.buf);
+    // draw_rule(&mut cam, rule, 8, 8);
+    // let s = cam.render();
+    // print!("{s}");
+
+    world.next();
 }
