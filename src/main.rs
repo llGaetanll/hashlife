@@ -70,7 +70,6 @@ impl CellBuf {
             cell.ne = self.move_cell(cell.ne, buf);
             cell.sw = self.move_cell(cell.sw, buf);
             cell.se = self.move_cell(cell.se, buf);
-            cell.res = self.move_cell(cell.res, buf);
         }
 
         Self::insert_buf(cell, buf)
@@ -150,7 +149,6 @@ fn build_8_cell() -> Cell {
         ne: 0b0000_0000_1100_1100,
         sw: 0b0011_0011_0000_0000,
         se: 0b1100_1100_0000_0000,
-        res: RES_UNSET_MASK,
     }
 }
 
@@ -160,7 +158,6 @@ fn build_full_8_cell() -> Cell {
         ne: u16::MAX as usize,
         sw: u16::MAX as usize,
         se: u16::MAX as usize,
-        res: RES_UNSET_MASK,
     }
 }
 
@@ -180,7 +177,6 @@ fn build_16_cell(cells: &mut [Cell]) -> Cell {
         ne: 2,
         sw: 3,
         se: 4,
-        res: RES_UNSET_MASK,
     };
 
     cells[0] = cell;

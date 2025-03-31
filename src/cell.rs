@@ -25,13 +25,6 @@ pub struct Cell {
     pub ne: CellHash,
     pub sw: CellHash,
     pub se: CellHash,
-
-    /// The index of the result of a [`Cell`].
-    ///
-    /// The result of a 2^n cell is a pointer to a 2^{n - 1} cell,
-    /// specifically it's what this cell will look like in 2^{n - 2}
-    /// iterations.
-    pub res: CellHash,
 }
 
 impl Cell {
@@ -42,7 +35,6 @@ impl Cell {
             ne: 0,
             sw: 0,
             se: 0,
-            res: RES_UNSET_MASK,
         }
     }
 
@@ -53,7 +45,6 @@ impl Cell {
             ne: 0,
             sw: 0,
             se: 0,
-            res: RES_UNSET_MASK,
         }
     }
 
@@ -202,7 +193,7 @@ impl Cell {
     ///     n00 n01 n02
     ///     n10 n11 n12
     ///     n20 n21 n22
-    /// 
+    ///
     /// Returns an 8 cell
     fn compute_node_res16(&self, buf: &[Cell], next: &[u16]) -> Cell {
         trace!("nw: {}", self.nw);
@@ -237,7 +228,6 @@ impl Cell {
             ne: n01 as usize,
             sw: n10 as usize,
             se: n11 as usize,
-            res: RES_UNSET_MASK,
         };
 
         let mut tr = Cell {
@@ -245,7 +235,6 @@ impl Cell {
             ne: n02 as usize,
             sw: n11 as usize,
             se: n12 as usize,
-            res: RES_UNSET_MASK,
         };
 
         let mut bl = Cell {
@@ -253,7 +242,6 @@ impl Cell {
             ne: n11 as usize,
             sw: n20 as usize,
             se: n21 as usize,
-            res: RES_UNSET_MASK,
         };
 
         let mut br = Cell {
@@ -261,7 +249,6 @@ impl Cell {
             ne: n12 as usize,
             sw: n21 as usize,
             se: n22 as usize,
-            res: RES_UNSET_MASK,
         };
 
         // Since the 4 cells above are 8x8 (i.e. leaves), these are rules
@@ -275,7 +262,6 @@ impl Cell {
             ne: tr_res as usize,
             sw: bl_res as usize,
             se: br_res as usize,
-            res: RES_UNSET_MASK,
         }
     }
 
@@ -341,7 +327,6 @@ pub mod cell_utils {
             ne: buf[c.ne].sw,
             sw: buf[c.sw].ne,
             se: buf[c.se].nw,
-            res: RES_UNSET_MASK,
         }
     }
 
@@ -353,7 +338,6 @@ pub mod cell_utils {
             ne: buf[e.nw].sw,
             sw: buf[w.se].ne,
             se: buf[e.sw].nw,
-            res: RES_UNSET_MASK,
         }
     }
 
@@ -365,7 +349,6 @@ pub mod cell_utils {
             ne: buf[n.se].sw,
             sw: buf[s.nw].ne,
             se: buf[s.ne].nw,
-            res: RES_UNSET_MASK,
         }
     }
 
@@ -376,7 +359,6 @@ pub mod cell_utils {
             ne: buf[buf[cell.ne].sw].sw,
             sw: buf[buf[cell.sw].ne].ne,
             se: buf[buf[cell.se].nw].nw,
-            res: RES_UNSET_MASK,
         }
     }
 
