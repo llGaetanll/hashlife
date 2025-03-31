@@ -65,6 +65,6 @@ knowable cell is an `n - 2k` cell
 
 - [x] Make compute leaf code work
 - [x] Draw non-leaf node
-- [ ] Make compute node code work
+- [x] Make compute node code work
 - [ ] `next()` should probably return a cell the same size at its input
       Otherwise the world just keeps getting smaller

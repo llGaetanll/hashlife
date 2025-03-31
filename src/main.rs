@@ -8,7 +8,6 @@ use cell::CellHash;
 use cell::LEAF_MASK;
 use cell::RES_UNSET_MASK;
 use render::Camera;
-use std::io::Write;
 use world::World;
 
 struct CellBuf {
@@ -256,38 +255,12 @@ fn main() {
     let s = cam.render();
     print!("{s}");
 
-    // cam.reset();
-    //
-    // let leaf = cell_utils::center16(cell, &world.buf);
-    // draw_leaf_cell(&mut cam, leaf, 4, 4);
-    // let s = cam.render();
-    // print!("{s}");
-    //
-    // cam.reset();
-    //
-    // let w = build_8_cell();
-    // let e = build_8_cell();
-    // let leaf = cell_utils::h_center16(w, e);
-    // draw_leaf_cell(&mut cam, leaf, 4, 4);
-    // let s = cam.render();
-    // print!("{s}");
-    //
-    // cam.reset();
-    //
-    // let n = build_8_cell();
-    // let s = build_8_cell();
-    // let leaf = cell_utils::v_center16(n, s);
-    // draw_leaf_cell(&mut cam, leaf, 4, 4);
-    // let s = cam.render();
-    // print!("{s}");
-    //
-    // cam.reset();
-    //
-    // let cell = build_16_cell(&mut world.buf);
-    // let rule = cell_utils::super_center16(cell, &world.buf);
-    // draw_rule(&mut cam, rule, 8, 8);
-    // let s = cam.render();
-    // print!("{s}");
+    cam.reset();
 
-    world.next();
+    // 8x8 cell
+    let cell = world.next();
+
+    draw_leaf_cell(&mut cam, cell, 4, 4);
+    let s = cam.render();
+    print!("{s}");
 }

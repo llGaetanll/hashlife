@@ -59,8 +59,8 @@ impl Cell {
 
     /// For a cell of sidelength `2^k`, this returns a cell of sidelength `2^{k - 1}`, the result
     /// after `2^{k - 2}` iterations
-    pub fn next(&mut self, next: &[u16], buf: &[Cell]) {
-        self.compute_res(next, buf);
+    pub fn next(&mut self, next: &[u16], buf: &[Cell]) -> Cell {
+        self.compute_res(next, buf)
     }
 
     // WARNING: A leaf check would fail after this. It's
@@ -107,11 +107,13 @@ impl Cell {
     }
 
     /// Compute the result of a cell, in case the cache failed
-    fn compute_res(&mut self, next: &[u16], buf: &[Cell]) {
+    fn compute_res(&mut self, next: &[u16], buf: &[Cell]) -> Cell {
         if self.is_leaf() {
             self.compute_leaf_res(next);
+
+            unreachable!()
         } else {
-            self.compute_node_res16(buf, next);
+            self.compute_node_res16(buf, next)
         }
     }
 
@@ -200,7 +202,8 @@ impl Cell {
     ///     n00 n01 n02
     ///     n10 n11 n12
     ///     n20 n21 n22
-    ///
+    /// 
+    /// Returns an 8 cell
     fn compute_node_res16(&self, buf: &[Cell], next: &[u16]) -> Cell {
         trace!("nw: {}", self.nw);
         trace!("ne: {}", self.ne);

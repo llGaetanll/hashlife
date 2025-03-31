@@ -48,12 +48,12 @@ impl World {
         })
     }
 
-    pub fn next(&mut self) {
+    pub fn next(&mut self) -> Cell {
         // todo
 
         let mut root_cell = self.buf[self.root];
 
-        root_cell.next(&self.rules, &self.buf);
+        root_cell.next(&self.rules, &self.buf)
     }
 
     /// Insert the cell at the given hash (turned into index)
