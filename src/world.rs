@@ -1,10 +1,12 @@
 use crate::cell::CellHash;
 use crate::cell::LEAF_MASK;
+use crate::render::Camera;
 use crate::rules::RuleSet;
 use crate::rules::RuleSetError;
 
 use crate::cell::Cell;
 
+#[derive(Debug)]
 pub struct World {
     /// Life rules
     ///
@@ -32,12 +34,10 @@ impl World {
         let rule_set: RuleSet = rule_set.parse()?;
         let rules = rule_set.compute_rules();
 
-        const MIN_BUF_SIZE: usize = 10_000;
-        let mut buf = vec![Cell::unset(); Self::next_prime(MIN_BUF_SIZE)];
-        buf[0] = Cell::void();
+        let buf = vec![Cell::void(), Cell::void()];
 
         let void = 0;
-        let root = 0;
+        let root = 1;
 
         Ok(Self {
             rules,
@@ -54,6 +54,76 @@ impl World {
         let mut root_cell = self.buf[self.root];
 
         root_cell.next(&self.rules, &self.buf)
+    }
+
+    /// Grows the world by a factor of 2^k, keeping the previous root at the origin
+    pub fn grow(&mut self, k: usize) {
+        if k == 0 {
+            return;
+        }
+
+        // The root is always the last
+        let old_root = self.buf.pop().unwrap();
+
+        let mask = if self.depth == 0 { LEAF_MASK } else { 0 };
+
+        let nw = Cell {
+            nw: mask,
+            ne: 0,
+            sw: 0,
+            se: old_root.nw & !mask,
+        };
+
+        let ne = Cell {
+            nw: mask,
+            ne: 0,
+            sw: old_root.ne,
+            se: 0,
+        };
+
+        let sw = Cell {
+            nw: mask,
+            ne: old_root.sw,
+            sw: 0,
+            se: 0,
+        };
+
+        let se = Cell {
+            nw: old_root.se | mask,
+            ne: 0,
+            sw: 0,
+            se: 0,
+        };
+
+        let n = self.buf.len();
+
+        self.buf.push(nw);
+        self.buf.push(ne);
+        self.buf.push(sw);
+        self.buf.push(se);
+
+        let root = Cell {
+            nw: n,
+            ne: n + 1,
+            sw: n + 2,
+            se: n + 3,
+        };
+
+        let n = self.buf.len();
+
+        self.buf.push(root);
+
+        self.root = n;
+        self.depth += 1;
+
+        self.grow(k - 1);
+    }
+
+    pub fn draw(&self, cam: &mut Camera) {
+        let root = self.buf[self.root];
+        let depth = self.depth;
+
+        draw_cell(cam, root, &self.buf, depth, 0, 0);
     }
 
     /// Insert the cell at the given hash (turned into index)
@@ -121,5 +191,57 @@ impl World {
 
             n += 2
         }
+    }
+}
+
+/// Draws a 4 cell
+fn draw_rule(cam: &mut Camera, rule: u16, dx: usize, dy: usize) {
+    let mut mask = 1 << 0xF;
+
+    let (mut x, mut y) = (0, 0);
+    while mask > 0 {
+        if rule & mask == mask {
+            cam.draw_pixel(x + dx, y + dy);
+        }
+
+        x = (x + 1) % 4;
+
+        if x == 0 {
+            y += 1;
+        }
+
+        mask >>= 1;
+    }
+}
+
+/// Draws an 8 cell
+fn draw_leaf(cam: &mut Camera, mut cell: Cell, dx: usize, dy: usize) {
+    assert!(cell.is_leaf());
+
+    cell.unmask_leaf();
+    {
+        let Cell { nw, ne, sw, se, .. } = cell;
+
+        draw_rule(cam, nw as u16, dx, dy);
+        draw_rule(cam, ne as u16, dx + 4, dy);
+        draw_rule(cam, sw as u16, dx, dy + 4);
+        draw_rule(cam, se as u16, dx + 4, dy + 4);
+    }
+    cell.mask_leaf();
+}
+
+/// Draws a 2^k cell for k > 3
+fn draw_cell(cam: &mut Camera, cell: Cell, cells: &[Cell], depth: u8, dx: usize, dy: usize) {
+    if cell.is_leaf() {
+        draw_leaf(cam, cell, dx, dy);
+    } else {
+        let Cell { nw, ne, sw, se, .. } = cell;
+
+        let d = 2usize.pow(2 + depth as u32);
+
+        draw_cell(cam, cells[nw], cells, depth - 1, dx, dy);
+        draw_cell(cam, cells[ne], cells, depth - 1, dx + d, dy);
+        draw_cell(cam, cells[sw], cells, depth - 1, dx, dy + d);
+        draw_cell(cam, cells[se], cells, depth - 1, dx + d, dy + d);
     }
 }

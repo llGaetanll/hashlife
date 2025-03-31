@@ -1,7 +1,5 @@
 use tracing::trace;
 
-use crate::render::Camera;
-
 /// On 64 bit machines: 1 followed by 63 0s, `9_223_372_036_854_775_808`.
 /// On 32 bit machines: 1 followed by 31 0s, `2_147_483_648`.
 ///
@@ -33,7 +31,7 @@ impl Cell {
     /// Return the canonical "empty" cell
     pub const fn void() -> Self {
         Self {
-            nw: 0,
+            nw: LEAF_MASK,
             ne: 0,
             sw: 0,
             se: 0,
@@ -104,10 +102,12 @@ impl Cell {
         if self.is_leaf() {
             self.compute_leaf_res(next);
 
-            unreachable!()
+            todo!()
         } else {
             self.compute_node_res16(buf, next)
         }
+
+        // TODO: Add general `compute_node_res` code here
     }
 
     /// For a leaf cell, this computes its result.
