@@ -1,5 +1,7 @@
 use tracing::trace;
 
+use crate::render::Camera;
+
 /// On 64 bit machines: 1 followed by 63 0s, `9_223_372_036_854_775_808`.
 /// On 32 bit machines: 1 followed by 31 0s, `2_147_483_648`.
 ///
@@ -115,7 +117,7 @@ impl Cell {
     ///   t20 t21 t22
     ///
     /// Remember that a leaf cell is composed entirely of u16s, each 4 squares on a side. This
-    /// makes leafs 8 cells, and their result 4 cells.
+    /// makes leaves 8 cells, and their result 4 cells.
     ///
     /// Here, `next` is a ruleset array, where `next[rule] = result(rule)`
     #[rustfmt::skip]
@@ -202,26 +204,40 @@ impl Cell {
         trace!("se: {}", self.se);
 
         // these are leaves
-        let nw = buf[self.nw];
-        let ne = buf[self.ne];
-        let sw = buf[self.sw];
-        let se = buf[self.se];
+        let mut nw = buf[self.nw];
+        let mut ne = buf[self.ne];
+        let mut sw = buf[self.sw];
+        let mut se = buf[self.se];
+
+        assert!(nw.is_leaf());
+        assert!(ne.is_leaf());
+        assert!(sw.is_leaf());
+        assert!(se.is_leaf());
 
         trace!("nw: {:?}", nw);
         trace!("ne: {:?}", ne);
         trace!("sw: {:?}", sw);
         trace!("se: {:?}", se);
 
-        // All of these are 4x4 rules
-        let n00 = cell_utils::center8(nw);
-        let n01 = cell_utils::h_center8(nw, ne);
-        let n02 = cell_utils::center8(ne);
-        let n10 = cell_utils::v_center8(nw, sw);
-        let n11 = cell_utils::super_center16(*self, buf);
-        let n12 = cell_utils::v_center8(ne, se);
-        let n20 = cell_utils::center8(sw);
-        let n21 = cell_utils::h_center8(sw, se);
-        let n22 = cell_utils::center8(se);
+        // cardinal pseudo-leaves
+        let mut n = cell_utils::h_center8(nw, ne);
+        let mut s = cell_utils::h_center8(sw, se);
+        let mut e = cell_utils::v_center8(ne, se);
+        let mut w = cell_utils::v_center8(nw, sw);
+
+        // center 8 leaf of 16 cell
+        let mut c = cell_utils::center16(*self, buf);
+
+        // All of these are rules
+        let n00 = nw.compute_leaf_res(next);
+        let n01 = n.compute_leaf_res(next);
+        let n02 = ne.compute_leaf_res(next);
+        let n10 = w.compute_leaf_res(next);
+        let n11 = c.compute_leaf_res(next);
+        let n12 = e.compute_leaf_res(next);
+        let n20 = sw.compute_leaf_res(next);
+        let n21 = s.compute_leaf_res(next);
+        let n22 = se.compute_leaf_res(next);
 
         let mut tl = Cell {
             nw: (n00 as usize) | LEAF_MASK,
@@ -307,18 +323,7 @@ pub mod cell_utils {
     use crate::cell::LEAF_MASK;
 
     use super::Cell;
-    use super::RES_UNSET_MASK;
-
     use tracing::trace;
-
-    // pub fn find_cell(nw: usize, ne: usize, sw: usize, se: usize, buf: &[Cell]) -> usize {
-    //     // Houston, we have a problem.
-    //     //
-    //     // Hashing a cell produces its result. What we want here is to return the index of a cell
-    //     // in `buf`, whose quandrants are identical those passed in.
-    //
-    //     todo!()
-    // }
 
     /// Given an n-cell, returns the n/2 cell at its center
     pub fn center(c: Cell, buf: &[Cell]) -> Cell {
@@ -362,56 +367,18 @@ pub mod cell_utils {
         }
     }
 
-    /// Given an 8 cell, returns the rule at its center.
-    /// Visually, looks like this:
-    ///
-    ///     --------
-    ///     --------
-    ///     --####--
-    ///     --####--
-    ///     --####--
-    ///     --####--
-    ///     --------
-    ///     --------
-    ///
-    pub fn center8(c: Cell) -> u16 {
-        assert!(c.is_leaf());
-
-        trace!("cell: {c:?}");
-
-        // leaves of the cell
-        // all of these have rules as children, and not pointers
-        let nw = (c.nw & !LEAF_MASK) as u16;
-        let ne = c.ne as u16;
-        let sw = c.sw as u16;
-        let se = c.se as u16;
-
-        trace!("nw: {nw:016b}");
-        trace!("ne: {ne:016b}");
-        trace!("sw: {sw:016b}");
-        trace!("se: {se:016b}");
-
-        // mask the corners of each rule
-        let nw = nw & 0b0000_0000_0011_0011;
-        let ne = ne & 0b0000_0000_1100_1100;
-        let sw = sw & 0b0011_0011_0000_0000;
-        let se = se & 0b1100_1100_0000_0000;
-
-        (nw << 10) | (ne << 6) | (sw >> 6) | (se >> 10)
-    }
-
-    /// Given two 8 cells `w` and `e`, returns the rule at their center.
+    /// Given two 8 cells `w` and `e`, returns the leaf at their center.
     /// Visually, if `w` is `-` and `e` is `+`, returns the area shaded `#`
     ///
-    ///     --------++++++++
-    ///     --------++++++++
-    ///     ------####++++++
-    ///     ------####++++++
-    ///     ------####++++++
-    ///     ------####++++++
-    ///     --------++++++++
-    ///     --------++++++++
-    pub fn h_center8(w: Cell, e: Cell) -> u16 {
+    ///     ----########++++
+    ///     ----########++++
+    ///     ----########++++
+    ///     ----########++++
+    ///     ----########++++
+    ///     ----########++++
+    ///     ----########++++
+    ///     ----########++++
+    pub fn h_center8(w: Cell, e: Cell) -> Cell {
         assert!(w.is_leaf());
         assert!(e.is_leaf());
 
@@ -423,83 +390,80 @@ pub mod cell_utils {
         let sw = w.se as u16;
         let se = e.sw as u16;
 
-        trace!("nw: {nw:016b}");
-        trace!("ne: {ne:016b}");
-        trace!("sw: {sw:016b}");
-        trace!("se: {se:016b}");
-
-        let nw = nw & 0b0000_0000_0011_0011;
-        let ne = ne & 0b0000_0000_1100_1100;
-        let sw = sw & 0b0011_0011_0000_0000;
-        let se = se & 0b1100_1100_0000_0000;
-
-        (nw << 10) | (ne << 6) | (sw >> 6) | (se >> 10)
+        Cell {
+            nw: nw as usize | LEAF_MASK,
+            ne: ne as usize,
+            sw: sw as usize,
+            se: se as usize,
+        }
     }
 
-    /// Given two 8 cells `n` and `s`, returns the rule at their center.
+    /// Given two 8 cells `n` and `s`, returns the leaf at their center.
     /// Visually, if `n` is `-` and `s` is `+`, returns the area shaded `#`
     ///
     ///     --------
     ///     --------
     ///     --------
     ///     --------
-    ///     --------
-    ///     --------
-    ///     --####--
-    ///     --####--
-    ///     ++####++
-    ///     ++####++
+    ///     ########
+    ///     ########
+    ///     ########
+    ///     ########
+    ///     ########
+    ///     ########
+    ///     ########
+    ///     ########
     ///     ++++++++
     ///     ++++++++
     ///     ++++++++
     ///     ++++++++
-    ///     ++++++++
-    ///     ++++++++
-    pub fn v_center8(n: Cell, s: Cell) -> u16 {
+    pub fn v_center8(n: Cell, s: Cell) -> Cell {
         assert!(n.is_leaf());
         assert!(s.is_leaf());
 
         trace!("n: {n:?}");
         trace!("s: {s:?}");
 
-        let nw = n.se as u16;
-        let ne = n.sw as u16;
-        let sw = s.ne as u16;
-        let se = (s.nw & !LEAF_MASK) as u16;
+        let nw = n.sw as u16;
+        let ne = n.se as u16;
+        let sw = (s.nw & !LEAF_MASK) as u16;
+        let se = s.ne as u16;
 
         trace!("nw: {nw:016b}");
         trace!("ne: {ne:016b}");
         trace!("sw: {sw:016b}");
         trace!("se: {se:016b}");
 
-        let nw = nw & 0b0000_0000_0011_0011;
-        let ne = ne & 0b0000_0000_1100_1100;
-        let sw = sw & 0b0011_0011_0000_0000;
-        let se = se & 0b1100_1100_0000_0000;
-
-        (nw << 10) | (ne << 6) | (sw >> 6) | (se >> 10)
+        Cell {
+            nw: nw as usize | LEAF_MASK,
+            ne: ne as usize,
+            sw: sw as usize,
+            se: se as usize,
+        }
     }
 
-    /// On a 16 cell, this is its 4x4 center rule
+    /// On a 16 cell, this is its 8x8 center leaf
     /// Visually, returns the shaded area
     ///
     ///     ----------------
     ///     ----------------
     ///     ----------------
     ///     ----------------
+    ///     ----########----
+    ///     ----########----
+    ///     ----########----
+    ///     ----########----
+    ///     ----########----
+    ///     ----########----
+    ///     ----########----
+    ///     ----########----
     ///     ----------------
     ///     ----------------
-    ///     ------####------
-    ///     ------####------
-    ///     ------####------
-    ///     ------####------
     ///     ----------------
     ///     ----------------
-    ///     ----------------
-    ///     ----------------
-    ///     ----------------
-    ///     ----------------
-    pub fn super_center16(cell: Cell, buf: &[Cell]) -> u16 {
+    pub fn center16(cell: Cell, buf: &[Cell]) -> Cell {
+        assert!(cell.is_parent());
+
         // leaves (i.e. 8 cells)
         let nw = buf[cell.nw];
         let ne = buf[cell.ne];
@@ -520,18 +484,18 @@ pub mod cell_utils {
         let nw = nw.se as u16;
         let ne = ne.sw as u16;
         let sw = sw.ne as u16;
-        let se = se.nw as u16;
+        let se = (se.nw & !LEAF_MASK) as u16;
 
         trace!("nw: {nw:016b}");
         trace!("ne: {ne:016b}");
         trace!("sw: {sw:016b}");
         trace!("se: {se:016b}");
 
-        let nw = nw & 0b0000_0000_0011_0011;
-        let ne = ne & 0b0000_0000_1100_1100;
-        let sw = sw & 0b0011_0011_0000_0000;
-        let se = se & 0b1100_1100_0000_0000;
-
-        (nw << 10) | (ne << 6) | (sw >> 6) | (se >> 10)
+        Cell {
+            nw: nw as usize | LEAF_MASK,
+            ne: ne as usize,
+            sw: sw as usize,
+            se: se as usize,
+        }
     }
 }
