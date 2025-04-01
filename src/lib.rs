@@ -1,10 +1,12 @@
-mod cell;
-mod render;
-mod rules;
-mod world;
+pub mod cell;
+pub mod io;
+pub mod rules;
+pub mod camera;
+pub mod events;
+pub mod world;
 
+use camera::Camera;
 use cell::Cell;
-use render::Camera;
 use world::World;
 
 fn setup_logging() {
@@ -98,7 +100,6 @@ fn build_16_cell(cells: &mut Vec<Cell>) -> usize {
 
 fn main() {
     setup_logging();
-    let mut cam = Camera::new(32, 32);
     let mut world = World::new(0, LIFE_RULES).unwrap();
 
     let root = build_cell(
@@ -112,9 +113,11 @@ fn main() {
     world.root = root;
     world.depth = 2;
 
-    cam.reset();
-
     world.grow(5);
 
     world.next();
+
+    let mut cam = Camera::new(32, 32);
+
+    cam.reset();
 }

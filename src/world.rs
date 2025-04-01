@@ -1,6 +1,6 @@
 use crate::cell::CellHash;
 use crate::cell::LEAF_MASK;
-use crate::render::Camera;
+use crate::camera::Camera;
 use crate::rules::RuleSet;
 use crate::rules::RuleSetError;
 
