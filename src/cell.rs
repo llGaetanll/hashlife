@@ -32,9 +32,12 @@ pub struct Cell {
 
 impl Cell {
     /// Return the canonical "empty" cell
+    ///
+    /// NOTE: A void cell is *not* tagged with the leaf mask. Cells of any size
+    /// can point to a void cell if any of their quadrants happen to be empty
     pub const fn void() -> Self {
         Self {
-            nw: LEAF_MASK,
+            nw: 0,
             ne: 0,
             sw: 0,
             se: 0,
@@ -141,6 +144,13 @@ impl Cell {
         }
     }
 
+    /// Check if the cell is void.
+    ///
+    /// Note that this is different from a cell being a leaf
+    pub fn is_void(&self) -> bool {
+        *self == Cell::void()
+    }
+
     /// Check if the cell is a leaf.
     ///
     /// Leaves are 8 cells
@@ -148,9 +158,13 @@ impl Cell {
         self.nw & LEAF_MASK == LEAF_MASK
     }
 
-    /// CHeck if the cell is a 16 cell (i.e. a cell composed only of leaves)
+    /// Check if the cell is a 16 cell (i.e. a cell composed only of leaves)
     pub fn is_16(&self, buf: &[Cell]) -> bool {
-        !self.is_leaf() && buf[self.nw].is_leaf()
+        !self.is_leaf()
+            && (buf[self.nw].is_leaf()
+                || buf[self.ne].is_leaf()
+                || buf[self.sw].is_leaf()
+                || buf[self.se].is_leaf())
     }
 
     /// Compute the result of a cell
@@ -160,17 +174,23 @@ impl Cell {
     /// A rule is just returned as a usize, but a cell is inserted into the buf and its index is
     /// returned
     fn compute_res(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
-        if self.is_leaf() {
-            debug!("Computing leaf res");
+        trace!("Compute res quadrants");
+        trace!("nw: {}", self.nw);
+        trace!("ne: {}", self.ne);
+        trace!("sw: {}", self.sw);
+        trace!("se: {}", self.se);
 
-            oneshot_draw(*self, buf, 0);
+        if self.is_void() {
+            0
+        } else if self.is_leaf() {
+            debug!("Computing leaf res");
+            debug_draw(*self, buf, 0);
 
             // NOTE: We only get here if called from `next`
             self.compute_leaf_res(next) as usize
         } else if self.is_16(buf) {
             debug!("Computing 16 cell res");
-
-            oneshot_draw(*self, buf, 1);
+            debug_draw(*self, buf, 1);
 
             let cell = self.compute_node_res16(next, buf);
 
@@ -181,9 +201,7 @@ impl Cell {
         } else {
             debug!("Computing node res");
 
-            oneshot_draw(*self, buf, 2);
-
-            let cell = self.compute_node_res(next, buf);
+            let cell = self.compute_node_res(next, buf); //
 
             let n = buf.len();
             buf.push(cell);
@@ -273,22 +291,12 @@ impl Cell {
     /// Computes the result of a 16 cell
     /// Returns an 8 cell
     #[rustfmt::skip]
-    fn compute_node_res16(&self, next: &[u16], buf: &[Cell]) -> Cell {
-        trace!("nw: {}", self.nw);
-        trace!("ne: {}", self.ne);
-        trace!("sw: {}", self.sw);
-        trace!("se: {}", self.se);
-
+    fn compute_node_res16(&self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
         // these are leaves
         let mut nw = buf[self.nw];
         let mut ne = buf[self.ne];
         let mut sw = buf[self.sw];
         let mut se = buf[self.se];
-
-        assert!(nw.is_leaf());
-        assert!(ne.is_leaf());
-        assert!(sw.is_leaf());
-        assert!(se.is_leaf());
 
         trace!("nw: {:?}", nw);
         trace!("ne: {:?}", ne);
@@ -304,16 +312,17 @@ impl Cell {
         // center 8 leaf of 16 cell
         let mut c = cell_utils::center16(*self, buf);
 
+        // NOTE: This downcast is safe. The only way down from here is either void or leaf
         // All of these are rules
-        let n00 = nw.compute_leaf_res(next);
-        let n01 =  n.compute_leaf_res(next);
-        let n02 = ne.compute_leaf_res(next);
-        let n10 =  w.compute_leaf_res(next);
-        let n11 =  c.compute_leaf_res(next);
-        let n12 =  e.compute_leaf_res(next);
-        let n20 = sw.compute_leaf_res(next);
-        let n21 =  s.compute_leaf_res(next);
-        let n22 = se.compute_leaf_res(next);
+        let n00 = nw.compute_res(next, buf) as u16;
+        let n01 =  n.compute_res(next, buf) as u16;
+        let n02 = ne.compute_res(next, buf) as u16;
+        let n10 =  w.compute_res(next, buf) as u16;
+        let n11 =  c.compute_res(next, buf) as u16;
+        let n12 =  e.compute_res(next, buf) as u16;
+        let n20 = sw.compute_res(next, buf) as u16;
+        let n21 =  s.compute_res(next, buf) as u16;
+        let n22 = se.compute_res(next, buf) as u16;
 
         // n00 n01 n02
         // n10 n11 n12
@@ -323,11 +332,11 @@ impl Cell {
         let mut bl = Cell::leaf(n10, n11, n20, n21);
         let mut br = Cell::leaf(n11, n12, n21, n22);
 
-        // Since the 4 cells above are 8x8 (i.e. leaves), these are rules
-        let tl_res = tl.compute_leaf_res(next);
-        let tr_res = tr.compute_leaf_res(next);
-        let bl_res = bl.compute_leaf_res(next);
-        let br_res = br.compute_leaf_res(next);
+        // NOTE: This downcast is safe for the same reason as the one above
+        let tl_res = tl.compute_res(next, buf) as u16;
+        let tr_res = tr.compute_res(next, buf) as u16;
+        let bl_res = bl.compute_res(next, buf) as u16;
+        let br_res = br.compute_res(next, buf) as u16;
 
         Cell::leaf(tl_res, tr_res, bl_res, br_res)
     }
@@ -335,32 +344,26 @@ impl Cell {
     /// Computes the result of a 2^k cell for k > 4 (i.e. at least 32 cells)
     #[rustfmt::skip]
     fn compute_node_res(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
-        trace!("nw: {}", self.nw);
-        trace!("ne: {}", self.ne);
-        trace!("sw: {}", self.sw);
-        trace!("se: {}", self.se);
-
         // at least 16 cells
         let mut nw = buf[self.nw];
         let mut ne = buf[self.ne];
         let mut sw = buf[self.sw];
         let mut se = buf[self.se];
 
-        debug!("NW:");
-        oneshot_draw(nw, buf, 1);
-
-        debug!("NE:");
-        oneshot_draw(ne, buf, 1);
-
-        debug!("SW:");
-        oneshot_draw(sw, buf, 1);
-
-        debug!("SE:");
-        oneshot_draw(se, buf, 1);
-
+        debug!("nw:");
+        debug_draw(nw, buf, 1);
         trace!("nw: {:?}", nw);
+
+        debug!("ne:");
+        debug_draw(ne, buf, 1);
         trace!("ne: {:?}", ne);
+
+        debug!("sw:");
+        debug_draw(sw, buf, 1);
         trace!("sw: {:?}", sw);
+
+        debug!("se:");
+        debug_draw(se, buf, 1);
         trace!("se: {:?}", se);
 
         // cardinal pseudo-cells
@@ -374,22 +377,40 @@ impl Cell {
 
         // All of these are cells
         let n00 = nw.compute_res(next, buf);
-        debug!("n01");
+        debug!("n00");
+        debug_draw(buf[n00], buf, 1);
+
         let n01 =  n.compute_res(next, buf);
-        debug!("n02");
+        debug!("n01");
+        debug_draw(buf[n01], buf, 1);
+
         let n02 = ne.compute_res(next, buf);
-        debug!("n10");
+        debug!("n02");
+        debug_draw(buf[n02], buf, 1);
+
         let n10 =  w.compute_res(next, buf);
+        debug!("n10");
+        debug_draw(buf[n10], buf, 1);
+
+        let n11 =  c.compute_res(next, buf); // 
         debug!("n11");
-        let n11 =  c.compute_res(next, buf);
-        debug!("n12");
+        debug_draw(buf[n11], buf, 1);
+
         let n12 =  e.compute_res(next, buf);
-        debug!("n20");
+        debug!("n12");
+        debug_draw(buf[n12], buf, 1);
+
         let n20 = sw.compute_res(next, buf);
-        debug!("n21");
+        debug!("n20");
+        debug_draw(buf[n20], buf, 1);
+
         let n21 =  s.compute_res(next, buf);
-        debug!("n22");
+        debug!("n21");
+        debug_draw(buf[n21], buf, 1);
+
         let n22 = se.compute_res(next, buf);
+        debug!("n22");
+        debug_draw(buf[n22], buf, 1);
 
         // n00 n01 n02
         // n10 n11 n12
@@ -399,34 +420,34 @@ impl Cell {
         let mut bl = Cell::new(n10, n11, n20, n21);
         let mut br = Cell::new(n11, n12, n21, n22);
 
-        debug!("TL:");
-        oneshot_draw(tl, buf, 1);
+        debug!("tl:");
+        debug_draw(tl, buf, 1);
 
-        debug!("TR:");
-        oneshot_draw(tr, buf, 1);
+        debug!("tr:");
+        debug_draw(tr, buf, 1);
 
-        debug!("BL:");
-        oneshot_draw(bl, buf, 1);
+        debug!("bl:");
+        debug_draw(bl, buf, 1);
 
-        debug!("BR:");
-        oneshot_draw(br, buf, 1);
+        debug!("br:");
+        debug_draw(br, buf, 1);
 
         let nw = tl.compute_res(next, buf);
         let ne = tr.compute_res(next, buf);
         let sw = bl.compute_res(next, buf);
         let se = br.compute_res(next, buf);
 
-        debug!("TL res:");
-        oneshot_draw(buf[nw], buf, 0);
+        debug!("tl res:");
+        debug_draw(buf[nw], buf, 0);
 
-        debug!("TR res:");
-        oneshot_draw(buf[ne], buf, 0);
+        debug!("tr res:");
+        debug_draw(buf[ne], buf, 0);
 
-        debug!("BL res:");
-        oneshot_draw(buf[sw], buf, 0);
+        debug!("bl res:");
+        debug_draw(buf[sw], buf, 0);
 
-        debug!("BR res:");
-        oneshot_draw(buf[se], buf, 0);
+        debug!("br res:");
+        debug_draw(buf[se], buf, 0);
 
         let res = Cell {
             nw,
@@ -436,7 +457,7 @@ impl Cell {
         };
 
         debug!("Final res:");
-        oneshot_draw(res, buf, 1);
+        debug_draw(res, buf, 1);
 
         res
     }
@@ -493,7 +514,7 @@ mod cell_utils {
         Cell::leaf(nw, ne, sw, se)
     }
 
-    /// Given two cells `w` and `e`, returns the cel at their center.
+    /// Given two cells `w` and `e`, returns the cell at their center.
     /// Visually, if `w` is `-` and `e` is `+`, returns the area shaded `#`
     ///
     ///     ----########++++
@@ -585,9 +606,6 @@ mod cell_utils {
     ///     ----########++++
     ///     ----########++++
     pub fn h_center8(w: Cell, e: Cell) -> Cell {
-        assert!(w.is_leaf());
-        assert!(e.is_leaf());
-
         trace!("w: {w:?}");
         trace!("e: {e:?}");
 
@@ -624,9 +642,6 @@ mod cell_utils {
     ///     ++++++++
     ///     ++++++++
     pub fn v_center8(n: Cell, s: Cell) -> Cell {
-        assert!(n.is_leaf());
-        assert!(s.is_leaf());
-
         trace!("n: {n:?}");
         trace!("s: {s:?}");
 
@@ -675,11 +690,6 @@ mod cell_utils {
         let ne = buf[cell.ne];
         let sw = buf[cell.sw];
         let se = buf[cell.se];
-
-        assert!(nw.is_leaf());
-        assert!(ne.is_leaf());
-        assert!(sw.is_leaf());
-        assert!(se.is_leaf());
 
         trace!("nw: {nw:?}");
         trace!("ne: {ne:?}");
@@ -747,6 +757,8 @@ fn draw_cell(cam: &mut Camera, cell: Cell, cells: &[Cell], depth: u8, dx: usize,
     if cell.is_leaf() {
         draw_leaf(cam, cell, dx, dy);
     } else {
+        assert!(depth > 0, "Expected non-zero depth for non-leaf node");
+
         let Cell { nw, ne, sw, se, .. } = cell;
 
         let d = 2usize.pow(2 + depth as u32);
@@ -758,12 +770,15 @@ fn draw_cell(cam: &mut Camera, cell: Cell, cells: &[Cell], depth: u8, dx: usize,
     }
 }
 
-fn oneshot_draw(cell: Cell, cells: &[Cell], depth: u8) {
-    let sl = 2usize.pow(depth as u32 + 3);
-    let mut cam = Camera::new(sl, sl);
-
-    draw_cell(&mut cam, cell, cells, depth, 0, 0);
-
-    let s = cam.render();
-    debug!("\n{s}");
+fn debug_draw(cell: Cell, cells: &[Cell], depth: u8) {
+    // if enabled!(Level::DEBUG) {
+    //     let sl = 2usize.pow(depth as u32 + 3);
+    //     let mut cam = Camera::new(sl, sl);
+    //
+    //     draw_cell(&mut cam, cell, cells, depth, 0, 0);
+    //
+    //     let s = cam.render();
+    //
+    //     debug!("\n{s}");
+    // }
 }

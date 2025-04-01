@@ -6,7 +6,6 @@ use crate::rules::RuleSetError;
 
 use crate::cell::Cell;
 
-#[derive(Debug)]
 pub struct World {
     /// Life rules
     ///
@@ -15,9 +14,6 @@ pub struct World {
 
     /// Index of the root [`Cell`] in `buf`
     pub root: usize,
-
-    /// Index of the void (empty) [`Cell`] in `buf`
-    pub void: usize,
 
     /// This is where all of our memory goes
     pub buf: Vec<Cell>,
@@ -36,13 +32,11 @@ impl World {
 
         let buf = vec![Cell::void(), Cell::void()];
 
-        let void = 0;
         let root = 1;
 
         Ok(Self {
             rules,
             root,
-            void,
             buf,
             depth,
         })
@@ -150,6 +144,23 @@ impl World {
 
             n += 2
         }
+    }
+}
+
+impl ::std::fmt::Debug for World {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[derive(Debug)]
+        struct DebugWorld<'a> {
+            root: &'a usize,
+            depth: &'a u8,
+            buf: &'a [Cell],
+        }
+
+        let Self {
+            root, buf, depth, ..
+        } = self;
+
+        ::std::fmt::Debug::fmt(&DebugWorld { root, depth, buf }, f)
     }
 }
 

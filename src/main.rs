@@ -20,18 +20,27 @@ fn setup_logging() {
 // See: https://conwaylife.com/wiki/Rulestring
 const LIFE_RULES: &str = "b3s23";
 
-/// Build this leaf cell:
-///
-///    00000000
-///    00000000
-///    00111100
-///    00111100
-///    00111100
-///    00111100
-///    00000000
-///    00000000
-///
-///
+fn build_cell(nw: Cell, ne: Cell, sw: Cell, se: Cell, cells: &mut Vec<Cell>) -> usize {
+    cells.pop(); // Pop the old root
+
+    let n = cells.len();
+
+    cells.extend([nw, ne, sw, se]);
+
+    let cell = Cell {
+        nw: n,
+        ne: n + 1,
+        sw: n + 2,
+        se: n + 3,
+    };
+
+    let n = cells.len();
+
+    cells.push(cell);
+
+    n
+}
+
 fn build_8_cell() -> Cell {
     Cell::leaf(
         0b0000_0000_0011_0011,
@@ -51,7 +60,7 @@ fn build_8_cell_full() -> Cell {
     Cell::leaf(u16::MAX, u16::MAX, u16::MAX, u16::MAX)
 }
 
-fn build_8_cell_glider() -> Cell {
+fn build_8_glider() -> Cell {
     Cell::leaf(
         0b0010_0001_0111_0000,
         0b0000_0100_0101_0110,
@@ -61,12 +70,12 @@ fn build_8_cell_glider() -> Cell {
 }
 
 fn build_16_cell(cells: &mut Vec<Cell>) -> usize {
-    cells.pop();
+    cells.pop(); // Pop the old root
 
-    let nw = build_8_cell_glider();
-    let ne = build_8_cell_glider();
-    let sw = build_8_cell_glider();
-    let se = build_8_cell_glider();
+    let nw = build_8_glider();
+    let ne = build_8_glider();
+    let sw = build_8_glider();
+    let se = build_8_glider();
 
     cells.push(nw);
     cells.push(ne);
@@ -90,23 +99,22 @@ fn build_16_cell(cells: &mut Vec<Cell>) -> usize {
 fn main() {
     setup_logging();
     let mut cam = Camera::new(32, 32);
-
     let mut world = World::new(0, LIFE_RULES).unwrap();
-    let idx = build_16_cell(&mut world.buf);
-    world.root = idx;
-    world.depth = 1;
 
-    world.grow(1);
+    let root = build_cell(
+        build_8_glider(),
+        build_8_glider(),
+        build_8_glider(),
+        build_8_glider(),
+        &mut world.buf,
+    );
 
-    world.draw(&mut cam);
-    let s = cam.render();
-    print!("{s}");
+    world.root = root;
+    world.depth = 2;
 
     cam.reset();
 
-    world.next();
+    world.grow(5);
 
-    world.draw(&mut cam);
-    let s = cam.render();
-    print!("{s}");
+    world.next();
 }
