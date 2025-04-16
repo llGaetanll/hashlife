@@ -74,8 +74,7 @@ knowable cell is an `n - 2k` cell
 - [x] Write `compute_node_res` for cells larger than 16
 - [x] Make `compute_res` modify the world root. Be sure to grow the resulting
       world back to the size it was before. Avoids the "shrinking world" problem
-- [ ] Implement drawing the right way. Don't recurse down the tree, but use a
-      ray casting like approach.
+- [x] Implement drawing the right way
 - [ ] Add tests to attempt checking for correctness
 - [ ] Slight cleanups & refactors
 - [ ] Add simple benchmarks
