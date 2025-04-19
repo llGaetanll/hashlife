@@ -37,6 +37,7 @@ pub struct Camera {
 }
 
 impl Camera {
+    /// Create a new camera `w` cells wide and `h` cells tall.
     pub fn new(w: usize, h: usize) -> Self {
         let cb = vec![false; w * h];
 
@@ -93,6 +94,21 @@ impl Camera {
 
     pub fn offset_y(&mut self, offset: i32) {
         self.y += offset;
+    }
+
+    pub fn resize(&mut self, w: usize, h: usize) {
+        self.w = w;
+        self.h = h;
+
+        self.cb.clear();
+        self.cb.resize(w * h, false);
+
+        self.fb.clear();
+
+        let (bw, bh) = (w.div_ceil(2), h.div_ceil(4));
+
+        self.cp.clear();
+        self.cp.resize(bw * bh, BRAILLE_EMPTY);
     }
 
     /// Turns on a single pixel of the framebuffer

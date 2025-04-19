@@ -7,53 +7,85 @@ use std::time::Duration;
 use crossterm::cursor;
 use crossterm::event;
 
-use crossterm::event::Event;
+use crossterm::event::Event as CtEvent;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 use crossterm::execute;
 use crossterm::style;
 use crossterm::terminal;
+use hashlife::camera;
+use hashlife::camera::Camera;
+use hashlife::cell::Cell;
+use hashlife::world::World;
 
 const FRAMERATE: u32 = 30;
 const FRAMETIME: time::Duration =
     time::Duration::from_millis(((1f64 / FRAMERATE as f64) * 1_000f64) as u64);
 
+enum Event {
+    ZoomIn,
+    ZoomOut,
+    CamResize { cols: u16, rows: u16 },
+    Exit,
+}
+
+const DUMMY_LEAF: Cell = Cell::leaf(
+    0b0010_0001_0111_0000,
+    0b0000_0100_0101_0110,
+    0b0110_1010_0010_0000,
+    0b0000_1110_1000_0100,
+);
+
+// See: https://conwaylife.com/wiki/Rulestring
+const LIFE_RULES: &str = "b3s23";
+
+fn setup_world(depth: u8) -> World {
+    let mut world = World::new(0, LIFE_RULES).unwrap();
+
+    world.buf.pop();
+    world.buf.push(DUMMY_LEAF);
+
+    let n = world.buf.len();
+
+    for i in 0..depth {
+        let i = n + i as usize - 1;
+        world.buf.push(Cell::new(i, i, i, i));
+    }
+
+    world.root = world.buf.len() - 1;
+    world.depth = depth;
+
+    world
+}
+
 /// Returns true if app should exit
-fn handle_event(event: Event) -> io::Result<bool> {
-    let mut stdout = io::stdout();
-
+fn handle_event(event: CtEvent) -> io::Result<Option<Event>> {
     match event {
-        Event::Key(key_event) => {
-            execute!(
-                stdout,
-                style::Print(format!("{:?}", key_event)),
-                cursor::MoveToNextLine(1)
-            )?;
-
-            match key_event {
-                KeyEvent {
-                    code: KeyCode::Char('q'),
-                    ..
-                }
-                | KeyEvent {
-                    code: KeyCode::Char('c'),
-                    modifiers: KeyModifiers::CONTROL,
-                    ..
-                } => Ok(true),
-                _ => Ok(false),
+        CtEvent::Key(key_event) => match key_event {
+            KeyEvent {
+                code: KeyCode::Char('q'),
+                ..
             }
-        }
-        Event::Resize(cols, rows) => {
-            execute!(
-                stdout,
-                style::Print(format!("({cols}x{rows})")),
-                cursor::MoveToNextLine(1)
-            )?;
-
-            Ok(false)
-        }
-        _ => Ok(false),
+            | KeyEvent {
+                code: KeyCode::Char('c'),
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => Ok(Some(Event::Exit)),
+            KeyEvent {
+                code: KeyCode::Char('J'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => Ok(Some(Event::ZoomOut)),
+            KeyEvent {
+                code: KeyCode::Char('K'),
+                modifiers: KeyModifiers::SHIFT,
+                ..
+            } => Ok(Some(Event::ZoomIn)),
+            _ => Ok(None),
+        },
+        CtEvent::Resize(cols, rows) => Ok(Some(Event::CamResize { cols, rows })),
+        _ => Ok(None),
     }
 }
 
@@ -61,27 +93,68 @@ fn main() -> Result<(), Box<dyn Error>> {
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
 
-    execute!(
-        stdout,
-        terminal::Clear(terminal::ClearType::All),
-        cursor::MoveTo(0, 0),
-    )?;
+    // Get the width and height of the terminal
+    let (cols, rows) = terminal::size()?;
+
+    let mut scale: u32 = 0;
+    let mut cam = Camera::new((cols as usize) * 2, (rows as usize) * 4);
+    let world = setup_world(6);
+    let root = world.buf[world.root];
 
     loop {
         let t = time::SystemTime::now();
 
         // Poll event for as long as FRAMETIME
-        let dt = if event::poll(FRAMETIME)? {
+        let (dt, event) = if event::poll(FRAMETIME)? {
             let event = event::read()?;
 
-            if handle_event(event)? {
-                break;
-            }
+            let event = handle_event(event)?;
+            let dt = t.elapsed()?;
 
-            t.elapsed()?
+            (dt, event)
         } else {
-            Duration::ZERO
+            (Duration::ZERO, None)
         };
+
+        match event {
+            None => {}
+            Some(Event::Exit) => break,
+            Some(Event::ZoomIn) => {
+                scale += 1;
+            }
+            Some(Event::ZoomOut) => scale = scale.saturating_sub(1),
+            Some(Event::CamResize { cols, rows }) => {
+                cam.resize((cols as usize) * 2, (rows as usize) * 4);
+            }
+        }
+
+        cam.reset();
+
+        camera::draw_cell(
+            &mut cam,
+            &world.buf,
+            root,
+            0,
+            0,
+            world.depth as u32 + 3,
+            scale,
+        );
+
+        let s = cam.render();
+
+        execute!(
+            stdout,
+            terminal::Clear(terminal::ClearType::All),
+            cursor::MoveTo(0, 0),
+        )?;
+
+        for line in s.lines() {
+            execute!(
+                stdout,
+                style::Print(line),
+                crossterm::cursor::MoveToNextLine(1)
+            )?;
+        }
 
         let time_left = FRAMETIME - dt;
         thread::sleep(time_left);
