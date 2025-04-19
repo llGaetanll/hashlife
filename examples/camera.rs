@@ -3,54 +3,50 @@ use hashlife::camera::Camera;
 use hashlife::cell::Cell;
 use hashlife::world::World;
 
-fn setup_world() -> World {
-    // See: https://conwaylife.com/wiki/Rulestring
-    const LIFE_RULES: &str = "b3s23";
+const DUMMY_LEAF: Cell = Cell::leaf(
+    0b0010_0001_0111_0000,
+    0b0000_0100_0101_0110,
+    0b0110_1010_0010_0000,
+    0b0000_1110_1000_0100,
+);
 
+// See: https://conwaylife.com/wiki/Rulestring
+const LIFE_RULES: &str = "b3s23";
+
+fn setup_world(depth: u8) -> World {
     let mut world = World::new(0, LIFE_RULES).unwrap();
 
     world.buf.pop();
-    world.buf.extend([
-        Cell::leaf(
-            0b0010_0001_0111_0000,
-            0b0000_0100_0101_0110,
-            0b0110_1010_0010_0000,
-            0b0000_1110_1000_0100,
-        ),
-        Cell::leaf(
-            0b0010_0001_0111_0000,
-            0b0000_0100_0101_0110,
-            0b0110_1010_0010_0000,
-            0b0000_1110_1000_0100,
-        ),
-        Cell::leaf(
-            0b0010_0001_0111_0000,
-            0b0000_0100_0101_0110,
-            0b0110_1010_0010_0000,
-            0b0000_1110_1000_0100,
-        ),
-        Cell::leaf(
-            0b0010_0001_0111_0000,
-            0b0000_0100_0101_0110,
-            0b0110_1010_0010_0000,
-            0b0000_1110_1000_0100,
-        ),
-        Cell::new(1, 2, 3, 4),
-    ]);
-    world.root = 5;
+    world.buf.push(DUMMY_LEAF);
+
+    let n = world.buf.len();
+
+    for i in 0..depth {
+        let i = n + i as usize - 1;
+        world.buf.push(Cell::new(i, i, i, i));
+    }
+
+    world.root = world.buf.len() - 1;
+    world.depth = depth;
 
     world
 }
 
 fn main() {
     let mut cam = Camera::new(100, 100);
-    let world = setup_world();
-    let root = world.buf[5];
-
-    let n = 4; // Leaf = 3
+    let world = setup_world(6);
+    let root = world.buf[world.root];
     let scale = 0;
 
-    camera::draw_cell(&mut cam, &world.buf, root, 0, 0, n, scale);
+    camera::draw_cell(
+        &mut cam,
+        &world.buf,
+        root,
+        0,
+        0,
+        world.depth as u32 + 3,
+        scale,
+    );
 
     let s = cam.render();
     println!("{s}");

@@ -97,8 +97,12 @@ impl Camera {
 
     /// Turns on a single pixel of the framebuffer
     pub fn draw_pixel(&mut self, x: usize, y: usize) {
-        assert!(x < self.w, "x is out of bounds");
-        assert!(y < self.h, "y is out of bounds");
+        // assert!(x < self.w, "x is out of bounds");
+        // assert!(y < self.h, "y is out of bounds");
+
+        if x >= self.w || y >= self.h {
+            return;
+        }
 
         let i = self.xy_from(x, y);
 
@@ -125,8 +129,12 @@ impl Camera {
 
     /// Turns on a square grid of pixels in the framebuffer
     pub fn draw_square(&mut self, x: usize, y: usize, s: usize) {
-        assert!(x < self.w - s, "x is out of bounds");
-        assert!(y < self.h - s, "y is out of bounds");
+        // assert!(x < self.w - s, "x is out of bounds");
+        // assert!(y < self.h - s, "y is out of bounds");
+
+        if x >= self.w - s || y >= self.h - s {
+            return;
+        }
 
         for dx in 0..s {
             for dy in 0..s {
@@ -139,8 +147,12 @@ impl Camera {
     }
 
     pub fn draw_clear_square(&mut self, x: usize, y: usize, s: usize) {
-        assert!(x < self.w - s, "x is out of bounds");
-        assert!(y < self.h - s, "y is out of bounds");
+        // assert!(x < self.w - s, "x is out of bounds");
+        // assert!(y < self.h - s, "y is out of bounds");
+
+        if x >= self.w - s || y >= self.h - s {
+            return;
+        }
 
         for dx in 0..s {
             for dy in 0..s {
