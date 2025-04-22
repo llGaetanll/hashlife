@@ -14,6 +14,10 @@ use crate::world::World;
 /// To get other configurations, just add the numbers above.
 const BRAILLE_EMPTY: u32 = 0x2800;
 
+pub type ScreenSize = u16;
+pub type CellOffset = i16;
+pub type WorldOffset = i128;
+
 pub struct Camera {
     /// The cell buffer
     cb: Vec<bool>,
@@ -24,28 +28,44 @@ pub struct Camera {
     /// Codepoints. This allows us to construct the framebuffer more easily
     cp: Vec<u32>,
 
-    /// Width of the framebuffer
-    w: usize,
+    /// Column width of the framebuffer
+    w: ScreenSize,
 
-    /// Height of the framebuffer
-    h: usize,
+    /// Column height of the framebuffer
+    h: ScreenSize,
 
     /// `x` offset from origin
-    x: i32,
+    x: WorldOffset,
 
     /// `y` offset from origin
-    y: i32,
+    y: WorldOffset,
 
+    // World scale expressed in cells as `2^scale`
     scale: u8,
 }
 
+// Lateral movement:
+// - Scale 0 (1 pixel = 1 cell): moves over 1 px (1 cell)
+// - Scale 1 (1 px = 2x2 cell): moves over 1 px (2 cell)
+// - Scale 2 (1 px = 4x4 cell): moves over 1 px (4 cell)
+// ...
+//
+// In general: lateral movements *always* move you 1 pixel over, which results in a 2^n movement
+
 impl Camera {
     /// Create a new camera `w` columns wide and `h` columns tall
-    pub fn new(w: usize, h: usize) -> Self {
-        // Braille width and height
-        let (w, h) = (w * 2, h * 4);
+    pub fn new(w: u16, h: u16) -> Self {
+        let (w, h) = (w as usize, h as usize);
 
-        let cb = vec![false; w * h];
+        // Cell width and height. Each braille character gives us 2 cells horizontally and 4
+        // vertically.
+        let (cw, ch) = (w * 2, h * 4);
+
+        // The cell buffer. This keeps track of the individual cells on the screen
+        let cb = vec![false; cw * ch];
+
+        // The codepoints buffer. This makes it easier to construct the frame buffer later
+        let cp = vec![BRAILLE_EMPTY; w * h];
 
         // For each braille character, we need 3 bytes:
         //  - The leader byte:     0b11100010
@@ -53,21 +73,12 @@ impl Camera {
         //  - Continuation byte 2: 0b10xxxxxx
         // For each newline, we need one byte: 0b00001010
         //
-        // Let `w` and `h` refer to width and height of the cell buffer. Then `bw = ceil(w / 2)`
-        // and `bh = ceil(h / 4)` are the width and height of braille characters of our framebuffer
-        // (that is, not accounting for the trailing newlines expected at the end of each line).
-
-        let (bw, bh) = (w.div_ceil(2), h.div_ceil(4));
-        let cp = vec![BRAILLE_EMPTY; bw * bh];
-
-        // Each braille character is 3 bytes, and newlines one byte. Since we need `bh` newlines,
-        // this gives us a framebuffer of length `3 * (bw * bh) + bh`.
-
-        let mut fb = String::with_capacity(3 * (bw * bh) + bh);
+        // We need h newlines, this gives us a framebuffer of length `3 * (w * h) + h`
+        let mut fb = String::with_capacity(3 * (w * h) + h);
 
         // Update the frame buffer
         for (i, &c) in cp.iter().enumerate() {
-            if i > 0 && i % bw == 0 {
+            if i > 0 && i % w == 0 {
                 fb.push('\n');
             }
 
@@ -79,54 +90,78 @@ impl Camera {
             cb,
             fb,
             cp,
-            w,
-            h,
+            w: w as ScreenSize,
+            h: h as ScreenSize,
             x: 0,
             y: 0,
             scale: 0,
         }
     }
 
-    pub fn width(&self) -> usize {
+    pub fn width(&self) -> ScreenSize {
         self.w
     }
 
-    pub fn height(&self) -> usize {
+    pub fn height(&self) -> ScreenSize {
         self.h
     }
 
-    pub fn offset_x(&mut self, offset: i32) {
-        self.x += offset;
+    pub fn move_left(&mut self) {
+        let dx = 2i128.pow(self.scale as u32);
+        self.x += dx;
     }
 
-    pub fn offset_y(&mut self, offset: i32) {
-        self.y += offset;
+    pub fn move_right(&mut self) {
+        let dx = 2i128.pow(self.scale as u32);
+        self.x -= dx;
     }
 
-    pub fn resize(&mut self, w: usize, h: usize) {
+    pub fn move_up(&mut self) {
+        let dy = 2i128.pow(self.scale as u32);
+        self.y += dy;
+    }
+
+    pub fn move_down(&mut self) {
+        let dy = 2i128.pow(self.scale as u32);
+        self.y -= dy;
+    }
+
+    /// Resize the camera to `w` columns wide, and `h` columns tall
+    pub fn resize(&mut self, w: ScreenSize, h: ScreenSize) {
         self.w = w;
         self.h = h;
 
+        let (w, h) = (w as usize, h as usize);
+
         self.cb.clear();
-        self.cb.resize(w * h, false);
+        self.cb.resize(w * h * 8, false); // We get 8 cells per character using braille
 
         self.fb.clear();
 
-        let (bw, bh) = (w.div_ceil(2), h.div_ceil(4));
-
         self.cp.clear();
-        self.cp.resize(bw * bh, BRAILLE_EMPTY);
+        self.cp.resize(w * h, BRAILLE_EMPTY);
     }
 
     pub fn draw(&mut self, world: &World) {
         let buf = &world.buf;
         let root = world.root;
         let cell = buf[root];
-        let (dx, dy) = (0, 0);
         let n = world.depth as u32 + 3;
         let scale = self.scale as u32;
 
-        draw_cell(self, buf, cell, dx, dy, n, scale);
+        // dx and dy here are screen pixel offsets.
+        // Since self.x and self.y encode true position, we need to divide them by 2^scale
+        let (dx, dy) = (self.x >> self.scale, self.y >> self.scale);
+
+        draw_cell(
+            self,
+            buf,
+            cell,
+            dx as CellOffset,
+            dy as CellOffset,
+            n,
+            scale,
+        );
     }
 
     pub fn zoom_in(&mut self) {
@@ -137,32 +172,35 @@ impl Camera {
         self.scale += 1;
     }
 
-    /// Turns on a single pixel of the framebuffer
-    pub fn draw_pixel(&mut self, x: usize, y: usize) {
-        // assert!(x < self.w, "x is out of bounds");
-        // assert!(y < self.h, "y is out of bounds");
+    /// Draw a single pixel of the framebuffer at (`x`, `y`)
+    pub fn draw_pixel(&mut self, x: CellOffset, y: CellOffset) {
+        let (x, y) = (x as i32, y as i32);
+        let (w, h) = (2 * self.w as i32, 4 * self.h as i32);
 
-        if x >= self.w || y >= self.h {
+        if x < 0 || y < 0 || x >= w || y >= h {
             return;
         }
 
-        let i = self.xy_from(x, y);
+        let i = Self::coords_from(x as ScreenSize, y as ScreenSize, w as usize); // Safe cast
 
         self.cb[i] = true;
     }
 
     pub fn draw_outline(&mut self) {
+        // Width of cell buffer
+        let wid = 2 * self.w as usize;
+
         for x in 0..self.w {
-            let i = self.xy_from(x, 0);
-            let j = self.xy_from(x, self.h - 1);
+            let i = Self::coords_from(x, 0, wid);
+            let j = Self::coords_from(x, self.h - 1, wid);
 
             self.cb[i] = true;
             self.cb[j] = true;
         }
 
         for y in 0..self.h {
-            let i = self.xy_from(0, y);
-            let j = self.xy_from(self.w - 1, y);
+            let i = Self::coords_from(0, y, wid);
+            let j = Self::coords_from(self.w - 1, y, wid);
 
             self.cb[i] = true;
             self.cb[j] = true;
@@ -170,40 +208,14 @@ impl Camera {
     }
 
     /// Turns on a square grid of pixels in the framebuffer
-    pub fn draw_square(&mut self, x: usize, y: usize, s: usize) {
-        // assert!(x < self.w - s, "x is out of bounds");
-        // assert!(y < self.h - s, "y is out of bounds");
-
-        if x >= self.w - s || y >= self.h - s {
-            return;
-        }
-
-        for dx in 0..s {
-            for dy in 0..s {
-                let (x, y) = (x + dx, y + dy);
-
-                let i = self.xy_from(x, y);
-                self.cb[i] = true
-            }
-        }
+    pub fn draw_square(&mut self, x: CellOffset, y: CellOffset, s: ScreenSize) {
+        self.rect_set(x, y, s, true)
     }
 
-    pub fn draw_clear_square(&mut self, x: usize, y: usize, s: usize) {
-        // assert!(x < self.w - s, "x is out of bounds");
-        // assert!(y < self.h - s, "y is out of bounds");
-
-        if x >= self.w - s || y >= self.h - s {
-            return;
-        }
-
-        for dx in 0..s {
-            for dy in 0..s {
-                let (x, y) = (x + dx, y + dy);
-
-                let i = self.xy_from(x, y);
-                self.cb[i] = false
-            }
-        }
+    /// Draw a clear square of sidelength `s` with origin (`x`, `y`) where the origin is taken to
+    /// be the top left side of the square.
+    pub fn draw_clear_square(&mut self, x: CellOffset, y: CellOffset, s: ScreenSize) {
+        self.rect_set(x, y, s, false)
     }
 
     /// Reset the cell buffer
@@ -211,20 +223,19 @@ impl Camera {
         self.cb.fill(false);
     }
 
-    /// Fundamentally, we have a framebuffer of every pixel on our screen, and we ask ourselves "Is
-    /// this pixel on or off?". This will be the technique used for drawing the tree later on
     pub fn render(&mut self) -> &str {
-        let bw = self.w.div_ceil(2);
-
         // compute new codepoints
         self.cp.fill(BRAILLE_EMPTY);
 
+        let wid = 2 * self.w as usize; // Width of cell buffer
         for (n, &px) in self.cb.iter().enumerate() {
-            let (x, y) = self.xy_to(n);
-            let hex = Self::get_hex_value(x, y);
-
             if px {
-                self.cp[(y / 4) * bw + (x / 2)] += hex;
+                let (x, y) = Self::coords_to(n, wid);
+                let i = (y / 4) * self.w + (x / 2);
+
+                let hex = Self::get_hex_value(x, y);
+
+                self.cp[i as usize] += hex;
             }
         }
 
@@ -232,8 +243,9 @@ impl Camera {
         self.fb.clear();
 
         // Update the frame buffer
+        let w = self.w as usize;
         for (i, &c) in self.cp.iter().enumerate() {
-            if i > 0 && i % bw == 0 {
+            if i > 0 && i % w == 0 {
                 self.fb.push('\n');
             }
 
@@ -244,15 +256,37 @@ impl Camera {
         &self.fb
     }
 
-    fn xy_to(&self, n: usize) -> (usize, usize) {
-        (n % self.w, n / self.w)
+    /// Set a (saturating) rectangle of the cell buffer to a value. Either true, or false.
+    fn rect_set(&mut self, x: CellOffset, y: CellOffset, s: ScreenSize, v: bool) {
+        let (x, y, s) = (x as i32, y as i32, s as i32);
+        let (w, h) = (2 * self.w as i32, 4 * self.h as i32);
+
+        if x + s < 0 || y + s < 0 || x >= w || y >= h {
+            return;
+        }
+
+        let (x_lo, x_hi) = (0.max(x), w.min(x + s));
+        let (y_lo, y_hi) = (0.max(y), h.min(y + s));
+
+        for x in x_lo..x_hi {
+            for y in y_lo..y_hi {
+                let (x, y) = (x as ScreenSize, y as ScreenSize);
+
+                let i = Self::coords_from(x, y, w as usize);
+                self.cb[i] = v;
+            }
+        }
     }
 
-    fn xy_from(&self, x: usize, y: usize) -> usize {
-        y * self.w + x
+    fn coords_to(n: usize, width: usize) -> (ScreenSize, ScreenSize) {
+        ((n % width) as ScreenSize, (n / width) as ScreenSize)
     }
 
-    fn get_hex_value(x: usize, y: usize) -> u32 {
+    fn coords_from(x: ScreenSize, y: ScreenSize, width: usize) -> usize {
+        y as usize * width + x as usize
+    }
+
+    fn get_hex_value(x: ScreenSize, y: ScreenSize) -> u32 {
         match (x % 2, y % 4) {
             (0, 0) => 0x1,
             (1, 0) => 0x8,
@@ -269,7 +303,7 @@ impl Camera {
 
 /// Draws a 4 cell
 /// dx and dy are offsets in screen pixels.
-fn draw_rule(cam: &mut Camera, rule: u16, dx: usize, dy: usize, scale: u32) {
+fn draw_rule(cam: &mut Camera, rule: u16, dx: CellOffset, dy: CellOffset, scale: u32) {
     match scale {
         // Each rule is 4x4
         // This is the closest zoom possible
@@ -327,7 +361,7 @@ fn draw_rule(cam: &mut Camera, rule: u16, dx: usize, dy: usize, scale: u32) {
     }
 }
 
-fn draw_leaf(cam: &mut Camera, cell: Cell, dx: usize, dy: usize, scale: u32) {
+fn draw_leaf(cam: &mut Camera, cell: Cell, dx: CellOffset, dy: CellOffset, scale: u32) {
     assert!(cell.is_leaf());
 
     match scale {
@@ -368,14 +402,22 @@ fn draw_leaf(cam: &mut Camera, cell: Cell, dx: usize, dy: usize, scale: u32) {
 }
 
 /// Draw a `2^n` cell. It's important to note here that n >= 3. n = 3 is a leaf
-fn draw_cell(cam: &mut Camera, buf: &[Cell], cell: Cell, dx: usize, dy: usize, n: u32, scale: u32) {
+fn draw_cell(
+    cam: &mut Camera,
+    buf: &[Cell],
+    cell: Cell,
+    dx: CellOffset,
+    dy: CellOffset,
+    n: u32,
+    scale: u32,
+) {
     // Too small to draw
     if scale > n {
         return;
     }
 
     // The square width of a node
-    let sw = 2usize.pow(n - scale);
+    let sw = 2u16.saturating_pow(n - scale);
 
     // Empty 2^n cell
     if cell.is_void() {
@@ -391,7 +433,9 @@ fn draw_cell(cam: &mut Camera, buf: &[Cell], cell: Cell, dx: usize, dy: usize, n
 
     // Non-leaf cell
     } else {
-        let sw = sw >> 1;
+        // As we recurse, the square width of nodes is halved
+        let sw = (sw >> 1) as CellOffset; // TODO: Not sure about this cast
+
         draw_cell(cam, buf, buf[cell.ne], dx, dy, n - 1, scale);
         draw_cell(cam, buf, buf[cell.nw], dx + sw, dy, n - 1, scale);
         draw_cell(cam, buf, buf[cell.se], dx, dy + sw, n - 1, scale);

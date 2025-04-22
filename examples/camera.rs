@@ -1,4 +1,3 @@
-use hashlife::camera;
 use hashlife::camera::Camera;
 use hashlife::cell::Cell;
 use hashlife::world::World;
@@ -33,7 +32,7 @@ fn setup_world(depth: u8) -> World {
 }
 
 fn main() {
-    let mut cam = Camera::new(100, 100);
+    let mut cam = Camera::new(10, 10);
     let world = setup_world(6);
 
     cam.draw(&world);

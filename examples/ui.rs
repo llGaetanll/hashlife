@@ -25,6 +25,10 @@ const FRAMETIME: time::Duration =
 enum Event {
     ZoomIn,
     ZoomOut,
+    MoveUp,
+    MoveDown,
+    MoveLeft,
+    MoveRight,
     CamResize { cols: u16, rows: u16 },
     Exit,
 }
@@ -81,6 +85,22 @@ fn handle_event(event: CtEvent) -> io::Result<Option<Event>> {
                 modifiers: KeyModifiers::SHIFT,
                 ..
             } => Ok(Some(Event::ZoomIn)),
+            KeyEvent {
+                code: KeyCode::Char('h'),
+                ..
+            } => Ok(Some(Event::MoveLeft)),
+            KeyEvent {
+                code: KeyCode::Char('j'),
+                ..
+            } => Ok(Some(Event::MoveDown)),
+            KeyEvent {
+                code: KeyCode::Char('k'),
+                ..
+            } => Ok(Some(Event::MoveUp)),
+            KeyEvent {
+                code: KeyCode::Char('l'),
+                ..
+            } => Ok(Some(Event::MoveRight)),
             _ => Ok(None),
         },
         CtEvent::Resize(cols, rows) => Ok(Some(Event::CamResize { cols, rows })),
@@ -95,7 +115,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Get the width and height of the terminal
     let (cols, rows) = terminal::size()?;
 
-    let mut cam = Camera::new(cols as usize, rows as usize);
+    let mut cam = Camera::new(cols, rows);
     let world = setup_world(6);
 
     loop {
@@ -118,8 +138,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(Event::Exit) => break,
             Some(Event::ZoomIn) => cam.zoom_in(),
             Some(Event::ZoomOut) => cam.zoom_out(),
+            Some(Event::MoveUp) => cam.move_up(),
+            Some(Event::MoveDown) => cam.move_down(),
+            Some(Event::MoveLeft) => cam.move_left(),
+            Some(Event::MoveRight) => cam.move_right(),
             Some(Event::CamResize { cols, rows }) => {
-                cam.resize((cols as usize) * 2, (rows as usize) * 4);
+                cam.resize(cols, rows);
             }
         }
 

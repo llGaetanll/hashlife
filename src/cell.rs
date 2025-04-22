@@ -2,6 +2,7 @@ use tracing::debug;
 use tracing::trace;
 
 use crate::camera::Camera;
+use crate::camera::CellOffset;
 
 /// On 64 bit machines: 1 followed by 63 0s, `9_223_372_036_854_775_808`.
 /// On 32 bit machines: 1 followed by 31 0s, `2_147_483_648`.
@@ -717,7 +718,7 @@ mod cell_utils {
 }
 
 /// Draws a 4 cell
-fn draw_rule(cam: &mut Camera, rule: u16, dx: usize, dy: usize) {
+fn draw_rule(cam: &mut Camera, rule: u16, dx: CellOffset, dy: CellOffset) {
     let mut mask = 1 << 0xF;
 
     let (mut x, mut y) = (0, 0);
@@ -737,7 +738,7 @@ fn draw_rule(cam: &mut Camera, rule: u16, dx: usize, dy: usize) {
 }
 
 /// Draws an 8 cell
-fn draw_leaf(cam: &mut Camera, mut cell: Cell, dx: usize, dy: usize) {
+fn draw_leaf(cam: &mut Camera, mut cell: Cell, dx: CellOffset, dy: CellOffset) {
     assert!(cell.is_leaf());
 
     cell.unmask_leaf();
@@ -753,7 +754,14 @@ fn draw_leaf(cam: &mut Camera, mut cell: Cell, dx: usize, dy: usize) {
 }
 
 /// Draws a 2^k cell for k > 3
-fn draw_cell(cam: &mut Camera, cell: Cell, cells: &[Cell], depth: u8, dx: usize, dy: usize) {
+fn draw_cell(
+    cam: &mut Camera,
+    cell: Cell,
+    cells: &[Cell],
+    depth: u8,
+    dx: CellOffset,
+    dy: CellOffset,
+) {
     if cell.is_leaf() {
         draw_leaf(cam, cell, dx, dy);
     } else {
@@ -761,7 +769,7 @@ fn draw_cell(cam: &mut Camera, cell: Cell, cells: &[Cell], depth: u8, dx: usize,
 
         let Cell { nw, ne, sw, se, .. } = cell;
 
-        let d = 2usize.pow(2 + depth as u32);
+        let d = 2usize.pow(2 + depth as u32) as CellOffset;
 
         draw_cell(cam, cells[nw], cells, depth - 1, dx, dy);
         draw_cell(cam, cells[ne], cells, depth - 1, dx + d, dy);
