@@ -35,18 +35,8 @@ fn setup_world(depth: u8) -> World {
 fn main() {
     let mut cam = Camera::new(100, 100);
     let world = setup_world(6);
-    let root = world.buf[world.root];
-    let scale = 0;
 
-    camera::draw_cell(
-        &mut cam,
-        &world.buf,
-        root,
-        0,
-        0,
-        world.depth as u32 + 3,
-        scale,
-    );
+    cam.draw(&world);
 
     let s = cam.render();
     println!("{s}");

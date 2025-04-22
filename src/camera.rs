@@ -1,5 +1,6 @@
 use crate::cell::Cell;
 use crate::cell::LEAF_MASK;
+use crate::world::World;
 
 /// Hex values of braille dots
 ///  
@@ -34,11 +35,16 @@ pub struct Camera {
 
     /// `y` offset from origin
     y: i32,
+
+    scale: u8,
 }
 
 impl Camera {
-    /// Create a new camera `w` cells wide and `h` cells tall.
+    /// Create a new camera `w` columns wide and `h` columns tall
     pub fn new(w: usize, h: usize) -> Self {
+        // Braille width and height
+        let (w, h) = (w * 2, h * 4);
+
         let cb = vec![false; w * h];
 
         // For each braille character, we need 3 bytes:
@@ -77,6 +83,7 @@ impl Camera {
             h,
             x: 0,
             y: 0,
+            scale: 0,
         }
     }
 
@@ -109,6 +116,25 @@ impl Camera {
 
         self.cp.clear();
         self.cp.resize(bw * bh, BRAILLE_EMPTY);
+    }
+
+    pub fn draw(&mut self, world: &World) {
+        let buf = &world.buf;
+        let root = world.root;
+        let cell = buf[root];
+        let (dx, dy) = (0, 0);
+        let n = world.depth as u32 + 3;
+        let scale = self.scale as u32;
+
+        draw_cell(self, buf, cell, dx, dy, n, scale);
+    }
+
+    pub fn zoom_in(&mut self) {
+        self.scale = self.scale.saturating_sub(1);
+    }
+
+    pub fn zoom_out(&mut self) {
+        self.scale += 1;
     }
 
     /// Turns on a single pixel of the framebuffer
@@ -243,7 +269,7 @@ impl Camera {
 
 /// Draws a 4 cell
 /// dx and dy are offsets in screen pixels.
-pub fn draw_rule(cam: &mut Camera, rule: u16, dx: usize, dy: usize, scale: u32) {
+fn draw_rule(cam: &mut Camera, rule: u16, dx: usize, dy: usize, scale: u32) {
     match scale {
         // Each rule is 4x4
         // This is the closest zoom possible
@@ -301,7 +327,7 @@ pub fn draw_rule(cam: &mut Camera, rule: u16, dx: usize, dy: usize, scale: u32) 
     }
 }
 
-pub fn draw_leaf(cam: &mut Camera, cell: Cell, dx: usize, dy: usize, scale: u32) {
+fn draw_leaf(cam: &mut Camera, cell: Cell, dx: usize, dy: usize, scale: u32) {
     assert!(cell.is_leaf());
 
     match scale {
@@ -342,15 +368,7 @@ pub fn draw_leaf(cam: &mut Camera, cell: Cell, dx: usize, dy: usize, scale: u32)
 }
 
 /// Draw a `2^n` cell. It's important to note here that n >= 3. n = 3 is a leaf
-pub fn draw_cell(
-    cam: &mut Camera,
-    buf: &[Cell],
-    cell: Cell,
-    dx: usize,
-    dy: usize,
-    n: u32,
-    scale: u32,
-) {
+fn draw_cell(cam: &mut Camera, buf: &[Cell], cell: Cell, dx: usize, dy: usize, n: u32, scale: u32) {
     // Too small to draw
     if scale > n {
         return;

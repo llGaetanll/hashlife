@@ -14,7 +14,6 @@ use crossterm::event::KeyModifiers;
 use crossterm::execute;
 use crossterm::style;
 use crossterm::terminal;
-use hashlife::camera;
 use hashlife::camera::Camera;
 use hashlife::cell::Cell;
 use hashlife::world::World;
@@ -96,10 +95,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Get the width and height of the terminal
     let (cols, rows) = terminal::size()?;
 
-    let mut scale: u32 = 0;
-    let mut cam = Camera::new((cols as usize) * 2, (rows as usize) * 4);
+    let mut cam = Camera::new(cols as usize, rows as usize);
     let world = setup_world(6);
-    let root = world.buf[world.root];
 
     loop {
         let t = time::SystemTime::now();
@@ -119,27 +116,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         match event {
             None => {}
             Some(Event::Exit) => break,
-            Some(Event::ZoomIn) => {
-                scale += 1;
-            }
-            Some(Event::ZoomOut) => scale = scale.saturating_sub(1),
+            Some(Event::ZoomIn) => cam.zoom_in(),
+            Some(Event::ZoomOut) => cam.zoom_out(),
             Some(Event::CamResize { cols, rows }) => {
                 cam.resize((cols as usize) * 2, (rows as usize) * 4);
             }
         }
 
         cam.reset();
-
-        camera::draw_cell(
-            &mut cam,
-            &world.buf,
-            root,
-            0,
-            0,
-            world.depth as u32 + 3,
-            scale,
-        );
-
+        cam.draw(&world);
         let s = cam.render();
 
         execute!(
@@ -156,7 +141,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             )?;
         }
 
-        let time_left = FRAMETIME - dt;
+        let time_left = FRAMETIME.saturating_sub(dt);
         thread::sleep(time_left);
     }
 
