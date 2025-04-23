@@ -126,6 +126,12 @@ impl Camera {
         self.y -= dy;
     }
 
+    pub fn reset_view(&mut self) {
+        self.scale = 0;
+        self.x = 0;
+        self.y = 0;
+    }
+
     /// Resize the camera to `w` columns wide, and `h` columns tall
     pub fn resize(&mut self, w: ScreenSize, h: ScreenSize) {
         self.w = w;
@@ -142,12 +148,16 @@ impl Camera {
         self.cp.resize(w * h, BRAILLE_EMPTY);
     }
 
+    /// Draw a [`World`] onto the cell buffer
     pub fn draw(&mut self, world: &World) {
         let buf = &world.buf;
         let root = world.root;
         let cell = buf[root];
         let n = world.depth as u32 + 3;
         let scale = self.scale as u32;
+
+        // TODO: Always drawing from the world root is wasteful. Figure out largest node larger
+        // than the screen view instead
 
         // dx and dy here are screen pixel offsets.
         // Since self.x and self.y encode true position, we need to divide them by 2^scale

@@ -18,7 +18,7 @@ use hashlife::camera::Camera;
 use hashlife::cell::Cell;
 use hashlife::world::World;
 
-const FRAMERATE: u32 = 30;
+const FRAMERATE: u32 = 120;
 const FRAMETIME: time::Duration =
     time::Duration::from_millis(((1f64 / FRAMERATE as f64) * 1_000f64) as u64);
 
@@ -30,6 +30,7 @@ enum Event {
     MoveLeft,
     MoveRight,
     CamResize { cols: u16, rows: u16 },
+    ResetView,
     Exit,
 }
 
@@ -101,6 +102,10 @@ fn handle_event(event: CtEvent) -> io::Result<Option<Event>> {
                 code: KeyCode::Char('l'),
                 ..
             } => Ok(Some(Event::MoveRight)),
+            KeyEvent {
+                code: KeyCode::Char('0'),
+                ..
+            } => Ok(Some(Event::ResetView)),
             _ => Ok(None),
         },
         CtEvent::Resize(cols, rows) => Ok(Some(Event::CamResize { cols, rows })),
@@ -144,6 +149,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(Event::MoveRight) => cam.move_right(),
             Some(Event::CamResize { cols, rows }) => {
                 cam.resize(cols, rows);
+            }
+            Some(Event::ResetView) => {
+                cam.reset_view();
             }
         }
 
