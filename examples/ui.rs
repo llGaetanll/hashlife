@@ -143,10 +143,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(Event::Exit) => break,
             Some(Event::ZoomIn) => cam.zoom_in(),
             Some(Event::ZoomOut) => cam.zoom_out(),
-            Some(Event::MoveUp) => cam.move_up(),
-            Some(Event::MoveDown) => cam.move_down(),
-            Some(Event::MoveLeft) => cam.move_left(),
-            Some(Event::MoveRight) => cam.move_right(),
+            Some(Event::MoveUp) => cam.move_up(1),
+            Some(Event::MoveDown) => cam.move_down(1),
+            Some(Event::MoveLeft) => cam.move_left(1),
+            Some(Event::MoveRight) => cam.move_right(1),
             Some(Event::CamResize { cols, rows }) => {
                 cam.resize(cols, rows);
             }

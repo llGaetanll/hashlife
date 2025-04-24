@@ -106,24 +106,24 @@ impl Camera {
         self.h
     }
 
-    pub fn move_left(&mut self) {
+    pub fn move_left(&mut self, n: u64) {
         let dx = 2i128.pow(self.scale as u32);
-        self.x += dx;
+        self.x += dx * n as i128;
     }
 
-    pub fn move_right(&mut self) {
+    pub fn move_right(&mut self, n: u64) {
         let dx = 2i128.pow(self.scale as u32);
-        self.x -= dx;
+        self.x -= dx * n as i128;
     }
 
-    pub fn move_up(&mut self) {
+    pub fn move_up(&mut self, n: u64) {
         let dy = 2i128.pow(self.scale as u32);
-        self.y += dy;
+        self.y += dy * n as i128;
     }
 
-    pub fn move_down(&mut self) {
+    pub fn move_down(&mut self, n: u64) {
         let dy = 2i128.pow(self.scale as u32);
-        self.y -= dy;
+        self.y -= dy * n as i128;
     }
 
     pub fn reset_view(&mut self) {
@@ -175,11 +175,21 @@ impl Camera {
     }
 
     pub fn zoom_in(&mut self) {
-        self.scale = self.scale.saturating_sub(1);
+        if self.scale == 0 {
+            return;
+        }
+
+        self.move_right(self.w as u64 / 2);
+        self.move_down(self.h as u64);
+
+        self.scale -= 1;
     }
 
     pub fn zoom_out(&mut self) {
         self.scale += 1;
+
+        self.move_left(self.w as u64 / 2);
+        self.move_up(self.h as u64);
     }
 
     /// Draw a single pixel of the framebuffer at (`x`, `y`)
