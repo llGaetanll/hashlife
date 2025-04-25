@@ -2,7 +2,7 @@ use tracing::debug;
 use tracing::trace;
 
 use crate::camera::Camera;
-use crate::camera::CellOffset;
+use crate::CellOffset;
 
 /// On 64 bit machines: 1 followed by 63 0s, `9_223_372_036_854_775_808`.
 /// On 32 bit machines: 1 followed by 31 0s, `2_147_483_648`.

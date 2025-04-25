@@ -29,6 +29,7 @@ enum Event {
     MoveDown,
     MoveLeft,
     MoveRight,
+    Next,
     CamResize { cols: u16, rows: u16 },
     ResetView,
     Exit,
@@ -59,6 +60,8 @@ fn setup_world(depth: u8) -> World {
 
     world.root = world.buf.len() - 1;
     world.depth = depth;
+
+    world.grow(1);
 
     world
 }
@@ -106,6 +109,10 @@ fn handle_event(event: CtEvent) -> io::Result<Option<Event>> {
                 code: KeyCode::Char('0'),
                 ..
             } => Ok(Some(Event::ResetView)),
+            KeyEvent {
+                code: KeyCode::Char(' '),
+                ..
+            } => Ok(Some(Event::Next)),
             _ => Ok(None),
         },
         CtEvent::Resize(cols, rows) => Ok(Some(Event::CamResize { cols, rows })),
@@ -121,7 +128,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (cols, rows) = terminal::size()?;
 
     let mut cam = Camera::new(cols, rows);
-    let world = setup_world(6);
+    let mut world = setup_world(2);
 
     loop {
         let t = time::SystemTime::now();
@@ -149,6 +156,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(Event::MoveRight) => cam.move_right(1),
             Some(Event::CamResize { cols, rows }) => {
                 cam.resize(cols, rows);
+            }
+            Some(Event::Next) => {
+                world.next();
             }
             Some(Event::ResetView) => {
                 cam.reset_view();

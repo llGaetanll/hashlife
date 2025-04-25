@@ -5,6 +5,10 @@ pub mod camera;
 pub mod events;
 pub mod world;
 
+pub type ScreenSize = u16;
+pub type CellOffset = i16;
+pub type WorldOffset = i128;
+
 use camera::Camera;
 use cell::Cell;
 use world::World;

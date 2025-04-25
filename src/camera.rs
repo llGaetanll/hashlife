@@ -1,6 +1,9 @@
 use crate::cell::Cell;
 use crate::cell::LEAF_MASK;
 use crate::world::World;
+use crate::CellOffset;
+use crate::ScreenSize;
+use crate::WorldOffset;
 
 /// Hex values of braille dots
 ///  
@@ -13,10 +16,6 @@ use crate::world::World;
 ///
 /// To get other configurations, just add the numbers above.
 const BRAILLE_EMPTY: u32 = 0x2800;
-
-pub type ScreenSize = u16;
-pub type CellOffset = i16;
-pub type WorldOffset = i128;
 
 pub struct Camera {
     /// The cell buffer
