@@ -1,17 +1,15 @@
+pub mod camera;
 pub mod cell;
+pub mod events;
 pub mod io;
 pub mod rules;
-pub mod camera;
-pub mod events;
 pub mod world;
 
 pub type ScreenSize = u16;
 pub type CellOffset = i16;
 pub type WorldOffset = i128;
 
-use camera::Camera;
 use cell::Cell;
-use world::World;
 
 fn setup_logging() {
     // Initialize the tracing subscriber with custom formatting
@@ -100,28 +98,4 @@ fn build_16_cell(cells: &mut Vec<Cell>) -> usize {
     cells.push(root);
 
     n
-}
-
-fn main() {
-    setup_logging();
-    let mut world = World::new(0, LIFE_RULES).unwrap();
-
-    let root = build_cell(
-        build_8_glider(),
-        build_8_glider(),
-        build_8_glider(),
-        build_8_glider(),
-        &mut world.buf,
-    );
-
-    world.root = root;
-    world.depth = 2;
-
-    world.grow(5);
-
-    world.next();
-
-    let mut cam = Camera::new(32, 32);
-
-    cam.reset();
 }
