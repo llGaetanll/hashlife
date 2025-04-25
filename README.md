@@ -75,6 +75,10 @@ knowable cell is an `n - 2k` cell
 - [x] Make `compute_res` modify the world root. Be sure to grow the resulting
       world back to the size it was before. Avoids the "shrinking world" problem
 - [x] Implement drawing the right way
+- [x] Implement basic game loop with movements (`ui` example)
+- [ ] Implement `setbit` function from hlife (allow populating the world with bit by bit)
+- [ ] Implement (de)serialization for RLE format (load and save external patterns)
+
 - [ ] Add tests to attempt checking for correctness
 - [ ] Slight cleanups & refactors
 - [ ] Add simple benchmarks
