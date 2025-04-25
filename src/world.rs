@@ -4,6 +4,7 @@ use crate::rules::RuleSet;
 use crate::rules::RuleSetError;
 
 use crate::cell::Cell;
+use crate::WorldOffset;
 
 pub struct World {
     /// Life rules
@@ -135,6 +136,70 @@ impl World {
             }
 
             n += 2
+        }
+    }
+}
+
+#[allow(clippy::collapsible_else_if)]
+fn set_bit(buf: &mut [Cell], cell_ptr: usize, x: WorldOffset, y: WorldOffset, depth: u8) {
+    match depth {
+        0..3 => unreachable!(),
+
+        // Leaf
+        3 => {
+            let cell = &mut buf[cell_ptr];
+
+            if x < 0 {
+                if y < 0 {
+                    cell.sw |= 1 << (3 - (x & 3) + 4 * (y & 3));
+                } else {
+                    cell.nw |= 1 << (3 - (x & 3) + 4 * (y & 3));
+                }
+            } else {
+                if y < 0 {
+                    cell.se |= 1 << (3 - (x & 3) + 4 * (y & 3));
+                } else {
+                    cell.ne |= 1 << (3 - (x & 3) + 4 * (y & 3));
+                }
+            }
+        }
+
+        // Non-leaf
+        depth => {
+            let cell = &mut buf[cell_ptr];
+
+            let child_ptr = if x < 0 {
+                if y < 0 {
+                    &mut cell.sw
+                } else {
+                    &mut cell.nw
+                }
+            } else {
+                if y < 0 {
+                    &mut cell.se
+                } else {
+                    &mut cell.ne
+                }
+            };
+
+            // We're pointing at nothing
+            if *child_ptr == 0 {
+                // Initialize the nodes
+                if depth == 3 {
+                    // Leaf
+                    todo!()
+                } else {
+                    todo!()
+                }
+            }
+
+            let w = 1 << depth;
+            let x = (x & (w - 1)) - (w >> 1);
+            let y = (y & (w - 1)) - (w >> 1);
+
+            let child_ptr = *child_ptr;
+
+            set_bit(buf, child_ptr, x, y, depth - 1)
         }
     }
 }
