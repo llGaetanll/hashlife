@@ -32,21 +32,17 @@ pub struct Cell {
 }
 
 impl Cell {
-    /// Return the canonical "empty" cell
+    /// Return the canonical "empty" cell. This is the same as an `uninit` cell, but has with
+    /// different semantics.
     ///
     /// NOTE: A void cell is *not* tagged with the leaf mask. Cells of any size
     /// can point to a void cell if any of their quadrants happen to be empty
     pub const fn void() -> Self {
-        Self {
-            nw: 0,
-            ne: 0,
-            sw: 0,
-            se: 0,
-        }
+        Self::uninit()
     }
 
     /// Return an unset cell
-    pub const fn unset() -> Self {
+    pub const fn uninit() -> Self {
         Self {
             nw: 0,
             ne: 0,
@@ -63,6 +59,10 @@ impl Cell {
             sw: sw as usize,
             se: se as usize,
         }
+    }
+
+    pub const fn leaf_uninit() -> Self {
+        Self::leaf(0, 0, 0, 0)
     }
 
     /// Create a new node given 4 indices. We assume the node has already been inserted

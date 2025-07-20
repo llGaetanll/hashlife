@@ -13,7 +13,7 @@ const DUMMY_LEAF: Cell = Cell::leaf(
 const LIFE_RULES: &str = "b3s23";
 
 fn setup_world(depth: u8) -> World {
-    let mut world = World::new(0, LIFE_RULES).unwrap();
+    let mut world = World::new(LIFE_RULES).unwrap();
 
     world.buf.pop();
     world.buf.push(DUMMY_LEAF);

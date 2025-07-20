@@ -24,11 +24,12 @@ pub struct World {
 
 impl World {
     /// Create an empty new world
-    pub fn new(depth: u8, rule_set: &str) -> Result<Self, RuleSetError> {
+    pub fn new(rule_set: &str) -> Result<Self, RuleSetError> {
         let rule_set: RuleSet = rule_set.parse()?;
         let rules = rule_set.compute_rules();
 
-        let buf = vec![Cell::void(), Cell::void()];
+        // First cell is the canonical void cell, second is the root, an uninitialized leaf
+        let buf = vec![Cell::void(), Cell::leaf_uninit()];
 
         let root = 1;
 
@@ -36,7 +37,7 @@ impl World {
             rules,
             root,
             buf,
-            depth,
+            depth: 3,
         })
     }
 
@@ -69,68 +70,99 @@ impl World {
 
         self.grow(k - 1);
     }
-}
 
-#[allow(clippy::collapsible_else_if)]
-fn set_bit(buf: &mut [Cell], cell_ptr: usize, x: WorldOffset, y: WorldOffset, depth: u8) {
-    match depth {
-        0..3 => unreachable!(),
+    pub fn set(&mut self, x: WorldOffset, y: WorldOffset) {
+        let root = self.root;
 
-        // Leaf
-        3 => {
-            let cell = &mut buf[cell_ptr];
+        self.set_bit(root, x, y, self.depth);
+    }
 
-            if x < 0 {
-                if y < 0 {
-                    cell.sw |= 1 << (3 - (x & 3) + 4 * (y & 3));
-                } else {
-                    cell.nw |= 1 << (3 - (x & 3) + 4 * (y & 3));
-                }
-            } else {
-                if y < 0 {
-                    cell.se |= 1 << (3 - (x & 3) + 4 * (y & 3));
-                } else {
-                    cell.ne |= 1 << (3 - (x & 3) + 4 * (y & 3));
-                }
-            }
-        }
+    fn set_bit(&mut self, ptr: usize, x: WorldOffset, y: WorldOffset, depth: u8) {
+        assert!(depth >= 3);
 
-        // Non-leaf
-        depth => {
-            let cell = &mut buf[cell_ptr];
+        if depth == 3 {
+            // Leaf
+            let cell = &mut self.buf[ptr];
 
-            let child_ptr = if x < 0 {
-                if y < 0 {
-                    &mut cell.sw
-                } else {
-                    &mut cell.nw
-                }
-            } else {
-                if y < 0 {
-                    &mut cell.se
-                } else {
-                    &mut cell.ne
-                }
-            };
+            let child = Self::get_child_idx_mut(cell, x, y);
+            *child |= 1 << (3 - (x & 3) + 4 * (y & 3));
+        } else {
+            // Non-leaf
+            let cell = self.buf[ptr];
+            let child_idx = Self::get_child_idx(cell, x, y);
 
             // We're pointing at nothing
-            if *child_ptr == 0 {
+            if child_idx == 0 {
                 // Initialize the nodes
-                if depth == 3 {
-                    // Leaf
-                    todo!()
+                let new_child_ptr = if depth == 3 {
+                    self.add_leaf()
                 } else {
-                    todo!()
-                }
+                    self.add_node()
+                };
+
+                let cell = &mut self.buf[ptr];
+                let child_idx = Self::get_child_idx_mut(cell, x, y);
+
+                *child_idx = new_child_ptr;
             }
 
             let w = 1 << depth;
             let x = (x & (w - 1)) - (w >> 1);
             let y = (y & (w - 1)) - (w >> 1);
 
-            let child_ptr = *child_ptr;
-
-            set_bit(buf, child_ptr, x, y, depth - 1)
+            self.set_bit(child_idx, x, y, depth - 1)
         }
+    }
+
+    #[allow(clippy::collapsible_else_if)]
+    fn get_child_idx(cell: Cell, x: i128, y: i128) -> usize {
+        if x < 0 {
+            if y < 0 {
+                cell.sw
+            } else {
+                cell.nw
+            }
+        } else {
+            if y < 0 {
+                cell.se
+            } else {
+                cell.ne
+            }
+        }
+    }
+
+    #[allow(clippy::collapsible_else_if)]
+    fn get_child_idx_mut(cell: &mut Cell, x: i128, y: i128) -> &mut usize {
+        if x < 0 {
+            if y < 0 {
+                &mut cell.sw
+            } else {
+                &mut cell.nw
+            }
+        } else {
+            if y < 0 {
+                &mut cell.se
+            } else {
+                &mut cell.ne
+            }
+        }
+    }
+
+    /// Add a leaf cell to the world and return its index
+    fn add_leaf(&mut self) -> usize {
+        let n = self.buf.len();
+
+        self.buf.push(Cell::leaf_uninit());
+
+        n
+    }
+
+    /// Add a non-leaf cell to the world and return its index
+    fn add_node(&mut self) -> usize {
+        let n = self.buf.len();
+
+        self.buf.push(Cell::uninit());
+
+        n
     }
 }
