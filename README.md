@@ -1,17 +1,16 @@
-# What is Hashlife
+# `hashlife`
 
-Fundamentally, Hashlife is a program that takes as input a cellular automaton
-state, and returns "what happens next". What we mean by "next" here is exactly
-what makes Hashlife special. A simple program for Conway's game of life might
-take as input an array of cells, and compute the next state on that array. What
-makes Hashlife special is that it allows us to calculate many iterations into the
-future.
+[Hashlife](https://en.wikipedia.org/wiki/Hashlife) is a program that efficiently
+computes Conway's Game of Life in large universes. A simple program might take
+as input an array of cells, and compute the next state on that array. What makes
+Hashlife special is that it allows us to calculate many iterations in the
+future, sometimes at no cost at all.
 
-# How does it work?
+## How does it work?
 
 There are two parts to Hashlife that make it clever. The first is how we store
-the cells, and the second is re-using computation (also known as caching). We'll
-get to caching a bit later but let's first talk about how the cells are stored.
+the cells, and the second is re-using computation. We'll get to caching a bit
+later but let's first talk about how the cells are stored.
 
 ## How Hashlife stores the cells
 
@@ -26,21 +25,24 @@ of cells `2^k` on a side. To be more specific, a world that is `2^10 = 1024`
 cells on a side, can be decomposed as 4 cells `512` on a side. Each of those
 further decompose until we get back down to the 1 cell.
 
-(In practice, HashLife does not start at the 1 cell but often at the 4 cell.)
+In practice, HashLife does not start at the 1 cell but often at the 4 cell, as 4
+cells require 16 bits of information, they store perfectly inside `u16`s.
+
+## Re-using Computation
+
+TODO
 
 ## What makes Hashlife so efficient
 
+## Notes
 
-# Notes
-
-- on an `n` cell, if we want to figure out its state in `k` iterations, the largest
-knowable cell is an `n - 2k` cell
-
+- On an `n` cell, if we want to figure out its state in `k` iterations, the largest
+  knowable cell is an `n - 2k` cell.
 - A 4x4 cell is called a "rule".
-- A leaf cell is size 8x8. It's composed of a `u16` rule in all 4 of its quadrants
-- Cells build up from the 8x8 as expected
+- A leaf cell is size 8x8. It's composed of a `u16` rule in all 4 of its quadrants.
+- Cells build up from the 8x8 as expected.
 
-# Optimization Ideas/Questions
+## Optimization Ideas/Questions
 
 *Benchmark, benchmark, benchmark!*
 
@@ -50,18 +52,7 @@ knowable cell is an `n - 2k` cell
 - How likely is it that parallelization would help here?
 - Should we use a `HashMap` instead of effectively making our own?
 
-# Further reading
-- [Original Paper by Bill Gosper](https://usr.lmf.cnrs.fr/~jcf/m1/gol/gosper-84.pdf)
-- [Wikipedia](https://en.wikipedia.org/wiki/Hashlife)
-- [Life Wiki](https://conwaylife.com/wiki/HashLife#cite_note-trokicki20060401-3)
-- [Life Lexicon](https://conwaylife.com/ref/lexicon/lex_h.htm#hashlife)
-- [Hlife](https://tomas.rokicki.com/hlife/)
-- [Dr. Dobb's Journal](http://www.ddj.com/dept/ai/184406478)
-    - [Archive Link](https://web.archive.org/web/20120719224016/http://www.drdobbs.com/jvm/an-algorithm-for-compressing-space-and-t/184406478)
-- [Hashlife Explained](https://web.archive.org/web/20220131050938/https://jennyhasahat.github.io/hashlife.html)
-- [Johnhw Hashlife](https://johnhw.github.io/hashlife/index.md.html)
-
-# TODO
+## TODO
 
 - [x] Make compute leaf code work
 - [x] Draw non-leaf node
@@ -84,3 +75,14 @@ knowable cell is an `n - 2k` cell
 - [ ] Add simple benchmarks
 
 - [ ] Add hashing
+
+## Further reading
+- [Original Paper by Bill Gosper](https://usr.lmf.cnrs.fr/~jcf/m1/gol/gosper-84.pdf)
+- [Wikipedia](https://en.wikipedia.org/wiki/Hashlife)
+- [Life Wiki](https://conwaylife.com/wiki/HashLife#cite_note-trokicki20060401-3)
+- [Life Lexicon](https://conwaylife.com/ref/lexicon/lex_h.htm#hashlife)
+- [Hlife](https://tomas.rokicki.com/hlife/)
+- [Dr. Dobb's Journal](http://www.ddj.com/dept/ai/184406478)
+    - [Archive Link](https://web.archive.org/web/20120719224016/http://www.drdobbs.com/jvm/an-algorithm-for-compressing-space-and-t/184406478)
+- [Hashlife Explained](https://web.archive.org/web/20220131050938/https://jennyhasahat.github.io/hashlife.html)
+- [Johnhw Hashlife](https://johnhw.github.io/hashlife/index.md.html)
