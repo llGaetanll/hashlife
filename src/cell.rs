@@ -247,7 +247,7 @@ impl Cell {
             let t21 = ((self.sw as u16 & 0b0000_0001_0001_0000) << 2)
                     | ((self.se as u16 & 0b0000_1000_1000_0000) >> 2);
 
-            let t22 = self.se as u16 & 0b0000_0110_0110_0000;
+            let t22 =   self.se as u16 & 0b0000_0110_0110_0000;
 
             trace!("nw:  {:016b}", self.nw);
             trace!("ne:  {:016b}", self.ne);
@@ -393,7 +393,7 @@ impl Cell {
         debug!("n10");
         debug_draw(buf[n10], buf, 1);
 
-        let n11 =  c.compute_res(next, buf); // 
+        let n11 =  c.compute_res(next, buf);
         debug!("n11");
         debug_draw(buf[n11], buf, 1);
 
