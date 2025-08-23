@@ -123,20 +123,6 @@ impl Cell {
         self.compute_res(next, buf)
     }
 
-    // WARNING: A leaf check would fail after this. It's
-    // important to remask the leaf as early as possible.
-    pub fn unmask_leaf(&mut self) {
-        assert!(self.is_leaf());
-
-        self.nw &= !LEAF_MASK;
-    }
-
-    pub fn mask_leaf(&mut self) {
-        // We mask leaves so that we have a way to differentiate between non-leaf cells and leaf
-        // cells
-        self.nw &= LEAF_MASK;
-    }
-
     pub fn children(&self) -> Option<[usize; 4]> {
         if self.is_leaf() {
             None
@@ -166,6 +152,20 @@ impl Cell {
                 || buf[self.ne].is_leaf()
                 || buf[self.sw].is_leaf()
                 || buf[self.se].is_leaf())
+    }
+
+    // WARNING: A leaf check would fail after this. It's
+    // important to remask the leaf as early as possible.
+    fn unmask_leaf(&mut self) {
+        assert!(self.is_leaf());
+
+        self.nw &= !LEAF_MASK;
+    }
+
+    fn mask_leaf(&mut self) {
+        // We mask leaves so that we have a way to differentiate between non-leaf cells and leaf
+        // cells
+        self.nw &= LEAF_MASK;
     }
 
     /// Compute the result of a cell
