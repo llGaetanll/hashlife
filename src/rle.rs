@@ -25,7 +25,10 @@ where
     let mut file = RleFile::default();
 
     // Parse as many comment lines as possible
-    while let (Some(line), rest) = read_line_comment(bytes)? {
+    loop {
+        let res = read_line_comment(bytes).context("Failed to read comment line")?;
+        let (Some(line), rest) = res else { break };
+
         match line {
             RleCommentLine::Comment => {}
             RleCommentLine::Name { name } => {
@@ -58,7 +61,8 @@ where
     }
 
     // Parse header line, if it's present
-    if let (Some(header), rest) = read_line_header(bytes)? {
+    let res = read_line_header(bytes).context("Failed to read header line")?;
+    if let (Some(header), rest) = res {
         let RleHeaderLine { x, y } = header;
         if file.offset.is_some() {
             bail!("Rle file offset already defined")
@@ -71,7 +75,7 @@ where
     let (x, y) = file.offset.unwrap_or((0, 0));
 
     // Parse encoding
-    read_encoding(bytes, x, y, f)?;
+    read_encoding(bytes, x, y, f).context("Failed to read encoding")?;
 
     Ok(file)
 }
@@ -143,8 +147,8 @@ fn read_line_comment(bytes: &[u8]) -> util_parse::ParseResult<(Option<RleComment
             bail!("Pattern rules not yet supported")
         }
 
-        c => {
-            bail!("Unrecognized comment type '{c}'")
+        b => {
+            bail!("Unrecognized comment type '{}'", b as char)
         }
     }
 }
@@ -172,12 +176,12 @@ fn read_line_header(bytes: &[u8]) -> util_parse::ParseResult<(Option<RleHeaderLi
             let line = RleHeaderLine { x, y };
             Ok((Some(line), bytes))
         }
-        b => bail!("Invalid token: expected ',' or '\n', found '{b}'"),
+        b => bail!("Invalid token: expected ',' or '\n', found '{}'", b as char),
     }
 }
 
 fn read_encoding<F>(
-    bytes: &[u8],
+    mut bytes: &[u8],
     mut dx: WorldOffset,
     mut dy: WorldOffset,
     mut f: F,
@@ -188,18 +192,24 @@ where
     let mut rep: u64 = 1;
 
     loop {
-        let (Some(b), bytes) = util_parse::take_1(bytes) else {
+        let Some(b) = util_parse::peek_1(bytes) else {
             bail!("Unexpected end of input")
         };
 
         match b {
-            b'\n' => {}
+            b'\n' => {
+                let (_, rest) = util_parse::take_1(bytes);
+                bytes = rest;
+            }
 
             // End of input
             b'!' => break,
 
             // Dead cell
             b'b' => {
+                let (_, rest) = util_parse::take_1(bytes);
+                bytes = rest;
+
                 dx += rep as WorldOffset;
 
                 rep = 1;
@@ -207,6 +217,9 @@ where
 
             // Live cell
             b'o' => {
+                let (_, rest) = util_parse::take_1(bytes);
+                bytes = rest;
+
                 for i in 0..rep {
                     f(dx + i as WorldOffset, dy)
                 }
@@ -216,6 +229,9 @@ where
 
             // End of line
             b'$' => {
+                let (_, rest) = util_parse::take_1(bytes);
+                bytes = rest;
+
                 dy += rep as WorldOffset;
 
                 rep = 1;
@@ -223,19 +239,20 @@ where
 
             // NOTE: All numbers are > 1
             n if n.is_ascii_digit() => {
-                let (Some(n), bytes) = util_parse::take_until_fn(|b| b.is_ascii_digit(), bytes)
+                let (Some(n), rest) = util_parse::take_until_fn(|b| !b.is_ascii_digit(), bytes)
                 else {
                     unreachable!("We peeked and found a digit")
                 };
+                bytes = rest;
 
                 if let Some(b'\n') = util_parse::peek_1(bytes) {
                     bail!("Repeat count cannot be cut off by a new line")
                 };
 
-                rep = util_parse::convert(n)?;
+                rep = util_parse::convert(n).context("Failed to convert run length")?;
             }
 
-            b => bail!("Unrecognized character '{b}'"),
+            b => bail!("Unrecognized character '{}'", b as char),
         }
     }
 
@@ -243,7 +260,7 @@ where
 }
 
 fn read_coordinates(bytes: &[u8]) -> util_parse::ParseResult<((WorldOffset, WorldOffset), &[u8])> {
-    let bytes = util_parse::expect(b'y', bytes)?;
+    let bytes = util_parse::expect(b'x', bytes)?;
     let bytes = util_parse::take_ws(bytes);
     let bytes = util_parse::expect(b'=', bytes)?;
     let bytes = util_parse::take_ws(bytes);
@@ -257,13 +274,23 @@ fn read_coordinates(bytes: &[u8]) -> util_parse::ParseResult<((WorldOffset, Worl
     let bytes = util_parse::expect(b'y', bytes)?;
     let bytes = util_parse::take_ws(bytes);
     let bytes = util_parse::expect(b'=', bytes)?;
+    let bytes = util_parse::take_ws(bytes);
 
     // Coordinates can be terminated with either `,` or `\n`.
     let p = |b| b == b',' || b == b'\n';
     let (Some(y_bytes), bytes) = util_parse::take_until_fn(p, bytes) else {
-        panic!("Expected x coordinate, found end of input")
+        panic!("Expected y coordinate, found end of input")
     };
     let y: WorldOffset = util_parse::convert(y_bytes).context("Failed to parse y offset")?;
 
     Ok(((x, y), bytes))
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn read_coordinates() {
+        let bytes = b"x = 1, y = 1\n";
+        super::read_coordinates(bytes.as_slice()).unwrap();
+    }
 }
