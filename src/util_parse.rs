@@ -46,9 +46,7 @@ pub fn split_n(bytes: &[u8], n: usize) -> (Option<&[u8]>, &[u8]) {
 
 /// Like `split_n`, but doesn't consume the slice
 pub fn peek_n(bytes: &[u8], n: usize) -> Option<&[u8]> {
-    let Some((res, _)) = bytes.split_at_checked(n) else {
-        return None;
-    };
+    let (res, _) = bytes.split_at_checked(n)?;
 
     Some(res)
 }
@@ -56,11 +54,11 @@ pub fn peek_n(bytes: &[u8], n: usize) -> Option<&[u8]> {
 /// Expects the next character in `bytes` to be `b`. Otherwise leaves `bytes` unchanged.
 pub fn expect(b: u8, bytes: &[u8]) -> ParseResult<&[u8]> {
     let (Some(a), bytes) = take_1(bytes) else {
-        bail!("Expected '{b}', found end of input")
+        bail!("Expected '{}', found end of input", b as char)
     };
 
     if a != b {
-        bail!("Expected '{b}', found '{a}'")
+        bail!("Expected '{}', found '{}'", b as char, a as char)
     }
 
     Ok(bytes)
@@ -86,9 +84,9 @@ where
         (None, bytes)
     } else {
         // SAFETY: 0 <= i < bytes.len()
-        let (left, right) = unsafe { bytes.split_at_unchecked(i) };
+        let (res, bytes) = unsafe { bytes.split_at_unchecked(i) };
 
-        (Some(left), right)
+        (Some(res), bytes)
     }
 }
 
@@ -133,7 +131,7 @@ pub fn convert<T: FromStr>(bytes: &[u8]) -> ParseResult<T> {
     let str = str::from_utf8(bytes)?;
 
     let Ok(res) = str.parse::<T>() else {
-        bail!("Failed to parse bytes")
+        bail!("Failed to convert bytes: '{str}'")
     };
 
     Ok(res)
