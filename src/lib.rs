@@ -2,8 +2,11 @@ pub mod camera;
 pub mod cell;
 pub mod events;
 pub mod io;
+pub mod rle;
 pub mod rules;
 pub mod world;
+
+mod util_parse;
 
 pub type ScreenSize = u16;
 pub type CellOffset = i16;
