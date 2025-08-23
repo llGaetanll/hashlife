@@ -37,6 +37,15 @@ pub struct RuleSet {
     rule: u32,
 }
 
+impl Default for RuleSet {
+    fn default() -> Self {
+        Self {
+            // Default to b3s23 - Conway's Game of Life
+            rule: 0b1u32 << (3 + 16) | 0b11 << 2,
+        }
+    }
+}
+
 impl RuleSet {
     /// Compute game rules for the current `RuleSet`.
     ///
