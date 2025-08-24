@@ -23,7 +23,7 @@ pub const RES_UNSET_MASK: usize = LEAF_MASK;
 /// A `CellHash` is either an index into a list of `Cell`s, or 4 cell stored directly as a u16
 pub type CellHash = usize;
 
-#[derive(PartialEq, Debug, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub struct Cell {
     pub nw: CellHash,
     pub ne: CellHash,
@@ -496,6 +496,31 @@ impl Cell {
 
         let h = se + c * (sw + c * (ne + c * nw));
         h.0
+    }
+}
+
+impl std::fmt::Debug for Cell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_leaf() {
+            // Unmask leaf
+            // NOTE: We don't use `.unmask_leaf` because it takes `&mut self`. Frankly it should
+            // just return a copy of the leaf, that whole system is stupid.
+            let nw = (self.nw & !LEAF_MASK) as u16;
+
+            f.debug_struct("Leaf")
+                .field("nw", &format!("{:b}", nw))
+                .field("ne", &format!("{:b}", self.ne))
+                .field("sw", &format!("{:b}", self.sw))
+                .field("se", &format!("{:b}", self.se))
+                .finish()
+        } else {
+            f.debug_struct("Cell")
+                .field("nw", &self.nw)
+                .field("ne", &self.ne)
+                .field("sw", &self.sw)
+                .field("se", &self.se)
+                .finish()
+        }
     }
 }
 
