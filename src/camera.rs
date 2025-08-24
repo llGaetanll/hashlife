@@ -455,9 +455,9 @@ fn draw_cell(
         // As we recurse, the square width of nodes is halved
         let sw = (sw >> 1) as CellOffset; // TODO: Not sure about this cast
 
-        draw_cell(cam, buf, buf[cell.ne], dx, dy, n - 1, scale);
-        draw_cell(cam, buf, buf[cell.nw], dx + sw, dy, n - 1, scale);
-        draw_cell(cam, buf, buf[cell.se], dx, dy + sw, n - 1, scale);
-        draw_cell(cam, buf, buf[cell.sw], dx + sw, dy + sw, n - 1, scale);
+        draw_cell(cam, buf, buf[cell.nw], dx, dy, n - 1, scale);
+        draw_cell(cam, buf, buf[cell.ne], dx + sw, dy, n - 1, scale);
+        draw_cell(cam, buf, buf[cell.sw], dx, dy + sw, n - 1, scale);
+        draw_cell(cam, buf, buf[cell.se], dx + sw, dy + sw, n - 1, scale);
     }
 }
