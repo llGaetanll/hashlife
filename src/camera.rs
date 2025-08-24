@@ -206,20 +206,20 @@ impl Camera {
     }
 
     pub fn draw_outline(&mut self) {
-        // Width of cell buffer
-        let wid = 2 * self.w as usize;
+        // Cell width and height
+        let (cw, ch) = (self.w * 2, self.h * 4);
 
-        for x in 0..self.w {
-            let i = Self::coords_from(x, 0, wid);
-            let j = Self::coords_from(x, self.h - 1, wid);
+        for x in 0..cw {
+            let i = Self::coords_from(x, 0, cw as usize);
+            let j = Self::coords_from(x, ch - 1, cw as usize);
 
             self.cb[i] = true;
             self.cb[j] = true;
         }
 
-        for y in 0..self.h {
-            let i = Self::coords_from(0, y, wid);
-            let j = Self::coords_from(self.w - 1, y, wid);
+        for y in 0..ch {
+            let i = Self::coords_from(0, y, ch as usize);
+            let j = Self::coords_from(cw - 1, y, ch as usize);
 
             self.cb[i] = true;
             self.cb[j] = true;
