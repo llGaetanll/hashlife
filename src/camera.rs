@@ -52,7 +52,7 @@ pub struct Camera {
 // In general: lateral movements *always* move you 1 pixel over, which results in a 2^n movement
 
 impl Camera {
-    /// Create a new camera `w` columns wide and `h` columns tall
+    /// Create a new camera `w` columns wide and `h` rows tall
     pub fn new(w: u16, h: u16) -> Self {
         let (w, h) = (w as usize, h as usize);
 
