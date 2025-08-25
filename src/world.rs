@@ -1,5 +1,4 @@
 use crate::rule_set::RuleSet;
-use crate::rule_set::RuleSetError;
 
 use crate::cell::Cell;
 use crate::WorldOffset;
@@ -24,21 +23,20 @@ pub struct World {
 
 impl World {
     /// Create an empty new world
-    pub fn new(rule_set: &str) -> Result<Self, RuleSetError> {
-        let rule_set: RuleSet = rule_set.parse()?;
-        let rules = rule_set.compute_rules();
+    pub fn new(rule: RuleSet) -> Self {
+        let rules = rule.compute_rules();
 
         // First cell is the canonical void cell, second is the root, an uninitialized leaf
         let buf = vec![Cell::void(), Cell::leaf_uninit()];
 
         let root = 1;
 
-        Ok(Self {
+        Self {
             rules,
             root,
             buf,
             depth: 3,
-        })
+        }
     }
 
     pub fn next(&mut self) {

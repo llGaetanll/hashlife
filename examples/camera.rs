@@ -1,5 +1,6 @@
 use hashlife::camera::Camera;
 use hashlife::cell::Cell;
+use hashlife::rule_set::B3S23;
 use hashlife::world::World;
 
 const DUMMY_LEAF: Cell = Cell::leaf(
@@ -9,11 +10,8 @@ const DUMMY_LEAF: Cell = Cell::leaf(
     0b0000_1110_1000_0100,
 );
 
-// See: https://conwaylife.com/wiki/Rulestring
-const LIFE_RULES: &str = "b3s23";
-
 fn setup_world(depth: u8) -> World {
-    let mut world = World::new(LIFE_RULES).unwrap();
+    let mut world = World::new(B3S23);
 
     world.buf.pop();
     world.buf.push(DUMMY_LEAF);

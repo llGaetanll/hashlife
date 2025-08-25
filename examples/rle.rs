@@ -3,6 +3,7 @@ use std::path::Path;
 
 use hashlife::camera::Camera;
 use hashlife::parse_rle::read_rle;
+use hashlife::rule_set::B3S23;
 use hashlife::world::World;
 
 fn main() {
@@ -13,7 +14,7 @@ fn main() {
     let data = data.as_bytes();
 
     let mut cam = Camera::new(100, 100);
-    let mut world = World::new("b3s23").unwrap();
+    let mut world = World::new(B3S23);
     world.grow(5);
 
     read_rle(data, |x, y| world.set(x, y)).expect("Failed to read RLE file");

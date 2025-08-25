@@ -1,9 +1,8 @@
-use std::str::FromStr;
-
 use anyhow::bail;
 use anyhow::Context;
 
 use crate::parse_util::ParseResult;
+use crate::rule_set;
 use crate::rule_set::RuleSet;
 use crate::WorldOffset;
 
@@ -146,7 +145,14 @@ fn read_line_comment(bytes: &[u8]) -> parse_util::ParseResult<(Option<RleComment
 
         // Pattern rules
         b'r' => {
-            bail!("Comment pattern rules not yet supported")
+            let bytes = parse_util::take_ws(bytes);
+            let (rule, bytes) =
+                rule_set::parse_nameless_rule(bytes).context("Failed to parse comment rule")?;
+            let bytes = parse_util::take_ws(bytes);
+
+            let line = RleCommentLine::RuleSet { set: rule };
+
+            Ok((Some(line), bytes))
         }
 
         b => {
@@ -179,17 +185,8 @@ fn read_line_header(bytes: &[u8]) -> parse_util::ParseResult<(Option<RleHeaderLi
             let bytes = parse_util::expect(b'=', bytes)?;
             let bytes = parse_util::take_ws(bytes);
 
-            let (Some(rule), bytes) = parse_util::take_until_ws(bytes) else {
-                bail!("Expected rule, found end of input")
-            };
-
-            let Ok(rule) = std::str::from_utf8(rule) else {
-                bail!("Failed to convert rule to utf-8")
-            };
-
-            let Ok(rule) = RuleSet::from_str(rule) else {
-                bail!("Invalid rule: \"{}\"", rule)
-            };
+            let (rule, bytes) =
+                rule_set::parse_rule(bytes).context("Failed to parse header rule")?;
 
             let line = RleHeaderLine {
                 x,
