@@ -197,7 +197,7 @@ impl Camera {
         let (w, h) = (2 * self.w as i32, 4 * self.h as i32);
 
         if x < 0 || y < 0 || x >= w || y >= h {
-            return;
+            panic!("coordinate out of bounds: size is ({w}, {h}) but the coordinate is ({x}, {y})")
         }
 
         let i = Self::coords_from(x as ScreenSize, y as ScreenSize, w as usize); // Safe cast

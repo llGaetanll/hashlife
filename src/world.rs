@@ -69,6 +69,24 @@ impl World {
     pub fn set(&mut self, x: WorldOffset, y: WorldOffset) {
         let root = self.root;
 
+        let w = 1 << (self.depth - 1);
+
+        assert!(
+            -w <= x && x < w,
+            "x coordinate out of bounds: the range is {}..{} but the coordinate is {}",
+            -w,
+            w,
+            x
+        );
+
+        assert!(
+            -w <= y && y < w,
+            "y coordinate out of bounds: the range is {}..{} but the coordinate is {}",
+            -w,
+            w,
+            y
+        );
+
         self.set_bit(root, x, y, self.depth);
     }
 
