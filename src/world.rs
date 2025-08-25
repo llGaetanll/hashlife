@@ -79,38 +79,39 @@ impl World {
             // Leaf
             let cell = &mut self.buf[ptr];
 
-            let child = Self::get_child_idx_mut(cell, x, y);
-            *child |= 1 << (3 - (x & 3) + 4 * (y & 3));
+            let quad = Self::get_quadrant_mut(cell, x, y);
+            *quad |= 1 << (3 - (x & 3) + 4 * (y & 3));
         } else {
             // Non-leaf
             let cell = self.buf[ptr];
-            let child_idx = Self::get_child_idx(cell, x, y);
+            let quad = Self::get_quadrant(cell, x, y);
+
+            let w = 1 << depth;
+            let f = |c| c - if c < 0 { -(w >> 2) } else { w >> 2 };
 
             // We're pointing at nothing
-            if child_idx == 0 {
-                // Initialize the nodes
-                let new_child_ptr = if depth == 3 {
+            if quad == 0 {
+                // Depth 4 means our child should be a leaf
+                let new_child_ptr = if depth == 4 {
                     self.add_leaf()
                 } else {
                     self.add_node()
                 };
 
                 let cell = &mut self.buf[ptr];
-                let child_idx = Self::get_child_idx_mut(cell, x, y);
 
-                *child_idx = new_child_ptr;
+                let quad = Self::get_quadrant_mut(cell, x, y);
+                *quad = new_child_ptr;
+
+                self.set_bit(new_child_ptr, f(x), f(y), depth - 1)
+            } else {
+                self.set_bit(quad, f(x), f(y), depth - 1)
             }
-
-            let w = 1 << depth;
-            let x = (x & (w - 1)) - (w >> 1);
-            let y = (y & (w - 1)) - (w >> 1);
-
-            self.set_bit(child_idx, x, y, depth - 1)
         }
     }
 
     #[allow(clippy::collapsible_else_if)]
-    fn get_child_idx(cell: Cell, x: i128, y: i128) -> usize {
+    fn get_quadrant(cell: Cell, x: i128, y: i128) -> usize {
         if x < 0 {
             if y < 0 {
                 cell.sw
@@ -127,7 +128,7 @@ impl World {
     }
 
     #[allow(clippy::collapsible_else_if)]
-    fn get_child_idx_mut(cell: &mut Cell, x: i128, y: i128) -> &mut usize {
+    fn get_quadrant_mut(cell: &mut Cell, x: i128, y: i128) -> &mut usize {
         if x < 0 {
             if y < 0 {
                 &mut cell.sw
