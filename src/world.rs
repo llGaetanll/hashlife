@@ -42,8 +42,7 @@ impl World {
     }
 
     pub fn next(&mut self) {
-        // The root is always last
-        let mut root = self.buf.pop().unwrap();
+        let mut root = self.buf[self.root];
 
         self.root = root.next(&self.rules, &mut self.buf);
         self.depth -= 1;
