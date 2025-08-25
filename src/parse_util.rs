@@ -20,7 +20,7 @@ pub fn take_ws(bytes: &[u8]) -> &[u8] {
 }
 
 /// Takes the next character from the slice. If none is found, the slice is left as-is.
-pub fn take_1(bytes: &[u8]) -> (Option<u8>, &[u8]) {
+pub const fn take_1(bytes: &[u8]) -> (Option<u8>, &[u8]) {
     let [b, bytes @ ..] = bytes else {
         return (None, bytes);
     };
@@ -36,7 +36,7 @@ pub fn peek_1(bytes: &[u8]) -> Option<u8> {
 }
 
 /// Split `bytes` as (&bytes[..n], &bytes[n..]). If `n > bytes.len()`, leaves `bytes` as-is.
-pub fn split_n(bytes: &[u8], n: usize) -> (Option<&[u8]>, &[u8]) {
+pub const fn split_n(bytes: &[u8], n: usize) -> (Option<&[u8]>, &[u8]) {
     let Some((res, bytes)) = bytes.split_at_checked(n) else {
         return (None, bytes);
     };
@@ -45,8 +45,10 @@ pub fn split_n(bytes: &[u8], n: usize) -> (Option<&[u8]>, &[u8]) {
 }
 
 /// Like `split_n`, but doesn't consume the slice
-pub fn peek_n(bytes: &[u8], n: usize) -> Option<&[u8]> {
-    let (res, _) = bytes.split_at_checked(n)?;
+pub const fn peek_n(bytes: &[u8], n: usize) -> Option<&[u8]> {
+    let Some((res, _)) = bytes.split_at_checked(n) else {
+        return None;
+    };
 
     Some(res)
 }
