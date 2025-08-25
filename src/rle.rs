@@ -72,10 +72,10 @@ where
         bytes = rest;
     }
 
-    let (x, y) = file.offset.unwrap_or((0, 0));
+    let (dx, dy) = file.offset.unwrap_or_default();
 
     // Parse encoding
-    read_encoding(bytes, x, y, f).context("Failed to read encoding")?;
+    read_encoding(bytes, dx, dy, f).context("Failed to read encoding")?;
 
     Ok(file)
 }
@@ -182,14 +182,16 @@ fn read_line_header(bytes: &[u8]) -> util_parse::ParseResult<(Option<RleHeaderLi
 
 fn read_encoding<F>(
     mut bytes: &[u8],
-    mut dx: WorldOffset,
-    mut dy: WorldOffset,
+    dx: WorldOffset,
+    dy: WorldOffset,
     mut f: F,
 ) -> util_parse::ParseResult<()>
 where
     F: FnMut(WorldOffset, WorldOffset),
 {
     let mut rep: u64 = 1;
+
+    let (mut x, mut y) = (0, 0);
 
     loop {
         let Some(b) = util_parse::peek_1(bytes) else {
@@ -210,7 +212,7 @@ where
                 let (_, rest) = util_parse::take_1(bytes);
                 bytes = rest;
 
-                dx += rep as WorldOffset;
+                x += rep as WorldOffset;
 
                 rep = 1;
             }
@@ -221,8 +223,10 @@ where
                 bytes = rest;
 
                 for i in 0..rep {
-                    f(dx + i as WorldOffset, dy)
+                    f(dx + x + i as WorldOffset, dy + y)
                 }
+
+                x += rep as WorldOffset;
 
                 rep = 1;
             }
@@ -232,7 +236,8 @@ where
                 let (_, rest) = util_parse::take_1(bytes);
                 bytes = rest;
 
-                dy += rep as WorldOffset;
+                y -= rep as WorldOffset;
+                x = 0;
 
                 rep = 1;
             }
