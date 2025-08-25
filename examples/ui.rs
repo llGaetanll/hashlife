@@ -59,7 +59,7 @@ fn setup_world(depth: u8) -> World {
     }
 
     world.root = world.buf.len() - 1;
-    world.depth = depth;
+    world.depth = depth + 3;
 
     world.grow(1);
 
