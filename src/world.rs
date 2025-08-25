@@ -57,15 +57,10 @@ impl World {
             return;
         }
 
-        // The root is always the last
-        let root = self.buf.pop().unwrap();
+        let root = self.buf[self.root];
         let root = root.grow(&mut self.buf);
+        self.buf[self.root] = root;
 
-        let n = self.buf.len();
-
-        self.buf.push(root);
-
-        self.root = n;
         self.depth += 1;
 
         self.grow(k - 1);
