@@ -2,7 +2,7 @@ use std::fs::read_to_string;
 use std::path::Path;
 
 use hashlife::camera::Camera;
-use hashlife::rle::read_rle;
+use hashlife::parse_rle::read_rle;
 use hashlife::world::World;
 
 fn main() {
