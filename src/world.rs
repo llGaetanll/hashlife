@@ -1,5 +1,5 @@
-use crate::rules::RuleSet;
-use crate::rules::RuleSetError;
+use crate::rule_set::RuleSet;
+use crate::rule_set::RuleSetError;
 
 use crate::cell::Cell;
 use crate::WorldOffset;

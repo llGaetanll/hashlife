@@ -1,7 +1,7 @@
 use anyhow::bail;
 use anyhow::Context;
 
-use crate::rules::RuleSet;
+use crate::rule_set::RuleSet;
 use crate::util_parse::ParseResult;
 use crate::WorldOffset;
 

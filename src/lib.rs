@@ -3,7 +3,7 @@ pub mod cell;
 pub mod events;
 pub mod io;
 pub mod rle;
-pub mod rules;
+pub mod rule_set;
 pub mod world;
 
 mod util_parse;
