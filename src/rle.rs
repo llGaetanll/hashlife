@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use anyhow::bail;
 use anyhow::Context;
 
@@ -63,7 +65,7 @@ where
     // Parse header line, if it's present
     let res = read_line_header(bytes).context("Failed to read header line")?;
     if let (Some(header), rest) = res {
-        let RleHeaderLine { x, y } = header;
+        let RleHeaderLine { x, y, .. } = header;
         if file.offset.is_some() {
             bail!("Rle file offset already defined")
         }
@@ -144,7 +146,7 @@ fn read_line_comment(bytes: &[u8]) -> util_parse::ParseResult<(Option<RleComment
 
         // Pattern rules
         b'r' => {
-            bail!("Pattern rules not yet supported")
+            bail!("Comment pattern rules not yet supported")
         }
 
         b => {
@@ -156,6 +158,7 @@ fn read_line_comment(bytes: &[u8]) -> util_parse::ParseResult<(Option<RleComment
 struct RleHeaderLine {
     x: WorldOffset,
     y: WorldOffset,
+    set: Option<RuleSet>,
 }
 
 /// Attempt to parse a header line, otherwise leaves `bytes` as-is.
@@ -170,10 +173,35 @@ fn read_line_header(bytes: &[u8]) -> util_parse::ParseResult<(Option<RleHeaderLi
 
     match b {
         b',' => {
-            todo!("Parse rules")
+            let bytes = util_parse::take_ws(bytes);
+            let bytes = util_parse::expect_slice("rule".as_bytes(), bytes)?;
+            let bytes = util_parse::take_ws(bytes);
+            let bytes = util_parse::expect(b'=', bytes)?;
+            let bytes = util_parse::take_ws(bytes);
+
+            let (Some(rule), bytes) = util_parse::take_until_ws(bytes) else {
+                bail!("Expected rule, found end of input")
+            };
+
+            let Ok(rule) = std::str::from_utf8(rule) else {
+                bail!("Failed to convert rule to utf-8")
+            };
+
+            let Ok(rule) = RuleSet::from_str(rule) else {
+                bail!("Invalid rule: \"{}\"", rule)
+            };
+
+            let line = RleHeaderLine {
+                x,
+                y,
+                set: Some(rule),
+            };
+
+            Ok((Some(line), bytes))
         }
         b'\n' => {
-            let line = RleHeaderLine { x, y };
+            let line = RleHeaderLine { x, y, set: None };
+
             Ok((Some(line), bytes))
         }
         b => bail!("Invalid token: expected ',' or '\n', found '{}'", b as char),
@@ -271,7 +299,7 @@ fn read_coordinates(bytes: &[u8]) -> util_parse::ParseResult<((WorldOffset, Worl
     let bytes = util_parse::take_ws(bytes);
 
     let (Some(x_bytes), bytes) = util_parse::take_with(b',', bytes) else {
-        panic!("Expected x coordinate, found end of input")
+        bail!("Expected x coordinate, found end of input")
     };
     let x: WorldOffset = util_parse::convert(x_bytes).context("Failed to parse x offset")?;
 
@@ -284,7 +312,7 @@ fn read_coordinates(bytes: &[u8]) -> util_parse::ParseResult<((WorldOffset, Worl
     // Coordinates can be terminated with either `,` or `\n`.
     let p = |b| b == b',' || b == b'\n';
     let (Some(y_bytes), bytes) = util_parse::take_until_fn(p, bytes) else {
-        panic!("Expected y coordinate, found end of input")
+        bail!("Expected y coordinate, found end of input")
     };
     let y: WorldOffset = util_parse::convert(y_bytes).context("Failed to parse y offset")?;
 

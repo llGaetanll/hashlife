@@ -64,6 +64,24 @@ pub fn expect(b: u8, bytes: &[u8]) -> ParseResult<&[u8]> {
     Ok(bytes)
 }
 
+/// Expects the next character in `bytes` to be `b`. Otherwise leaves `bytes` unchanged.
+pub fn expect_slice<'a>(bs: &[u8], bytes: &'a [u8]) -> ParseResult<&'a [u8]> {
+    if bytes.starts_with(bs) {
+        // SAFETY: bytes starts with bs, so 0 <= bs.len() <= bytes.len();
+        let (_, bytes) = unsafe { bytes.split_at_unchecked(bs.len()) };
+
+        Ok(bytes)
+    } else {
+        let n = bs.len().min(bytes.len());
+
+        bail!(
+            "Expected \"{}\", found \"{}\"",
+            String::from_utf8_lossy(bs),
+            String::from_utf8_lossy(&bytes[..n]),
+        )
+    }
+}
+
 /// Advance the slice until `P` is satisfied, without consuming it.
 #[inline]
 pub fn take_until_fn<P>(p: P, bytes: &[u8]) -> (Option<&[u8]>, &[u8])

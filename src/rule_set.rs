@@ -125,6 +125,7 @@ impl FromStr for RuleSet {
 
         for c in s.chars() {
             match c {
+                '/' => {}
                 'b' | 'B' => {
                     state = State::Birth;
                 }
