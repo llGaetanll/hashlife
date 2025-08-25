@@ -68,12 +68,13 @@ TODO
 - [x] Implement drawing the right way
 - [x] Implement basic game loop with movements (`ui` example)
 - [x] Implement `setbit` function from hlife (allow populating the world with bit by bit)
-- [ ] Implement (de)serialization for RLE format (load and save external patterns)
-
+- [ ] RLE format support
+  - [ ] Serialization
+  - [x] Deserialization
+- [x] Slight cleanups & refactors
 - [ ] Add tests to attempt checking for correctness
-- [ ] Slight cleanups & refactors
+- [ ] Improve APIs around `read_rle`
 - [ ] Add simple benchmarks
-
 - [ ] Add hashing
 
 ## Further reading
