@@ -16,9 +16,9 @@ pub struct World {
     /// This is where all of our memory goes
     pub buf: Vec<Cell>,
 
-    /// World depth, where `0` is a leaf [`Cell`], (8x8 world size).
+    /// World depth, where `3` is a leaf [`Cell`], (8x8 world size).
     ///
-    /// In general, `n` yields a world sidelength of `2^(n + 3)`
+    /// In general, `n` yields a world sidelength of `2^n`
     pub depth: u8,
 }
 

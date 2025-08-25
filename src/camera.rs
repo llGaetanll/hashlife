@@ -152,7 +152,7 @@ impl Camera {
         let buf = &world.buf;
         let root = world.root;
         let cell = buf[root];
-        let n = world.depth as u32 + 3;
+        let n = world.depth as u32;
         let scale = self.scale as u32;
 
         // TODO: Always drawing from the world root is wasteful. Figure out largest node larger
