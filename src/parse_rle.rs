@@ -19,7 +19,7 @@ pub struct RleFile<'a> {
 /// Parse the RLE file format. Assumes the bytes are valid Ascii.
 ///
 /// See: https://conwaylife.com/wiki/Run_Length_Encoded
-pub fn read_rle<F>(mut bytes: &[u8], f: F) -> ParseResult<RleFile>
+pub fn read_rle<F>(mut bytes: &'_ [u8], f: F) -> ParseResult<RleFile<'_>>
 where
     F: FnMut(WorldOffset, WorldOffset),
 {
@@ -90,7 +90,9 @@ enum RleCommentLine<'a> {
 }
 
 /// Attempt to parse a comment line, otherwise leaves `bytes` as-is.
-fn read_line_comment(bytes: &[u8]) -> parse_util::ParseResult<(Option<RleCommentLine>, &[u8])> {
+fn read_line_comment(
+    bytes: &'_ [u8],
+) -> parse_util::ParseResult<(Option<RleCommentLine<'_>>, &'_ [u8])> {
     let Ok(bytes) = parse_util::expect(b'#', bytes) else {
         return Ok((None, bytes));
     };
