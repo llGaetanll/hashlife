@@ -541,16 +541,6 @@ mod cell_utils {
     }
 
     /// Given two cells `w` and `e`, returns the cell at their center.
-    /// Visually, if `w` is `-` and `e` is `+`, returns the area shaded `#`
-    ///
-    ///     ----########++++
-    ///     ----########++++
-    ///     ----########++++
-    ///     ----########++++
-    ///     ----########++++
-    ///     ----########++++
-    ///     ----########++++
-    ///     ----########++++
     pub fn h_center(w: Cell, e: Cell) -> Cell {
         Cell {
             nw: w.ne,
@@ -560,27 +550,7 @@ mod cell_utils {
         }
     }
 
-    /// Given two cells `n` and `s`, returns the cell at their center.
-    /// Visually, if `n` is `-` and `s` is `+`, returns the area shaded `#`
-    ///
-    ///     --------
-    ///     --------
-    ///     --------
-    ///     --------
-    ///     ########
-    ///     ########
-    ///     ########
-    ///     ########
-    ///     ########
-    ///     ########
-    ///     ########
-    ///     ########
-    ///     ++++++++
-    ///     ++++++++
-    ///     ++++++++
-    ///     ++++++++
-    ///
-    /// NOTE: Must be at least a 16 cell
+    /// Given two 16-cells `n` and `s`, returns the cell at their center.
     pub fn v_center(n: Cell, s: Cell) -> Cell {
         Cell {
             nw: n.sw,
@@ -591,25 +561,6 @@ mod cell_utils {
     }
 
     /// Given an n-cell, returns the n/2 cell at its center
-    /// Visually, returns the shaded area
-    ///
-    ///     ----------------
-    ///     ----------------
-    ///     ----------------
-    ///     ----------------
-    ///     ----########----
-    ///     ----########----
-    ///     ----########----
-    ///     ----########----
-    ///     ----########----
-    ///     ----########----
-    ///     ----########----
-    ///     ----########----
-    ///     ----------------
-    ///     ----------------
-    ///     ----------------
-    ///     ----------------
-    ///
     /// NOTE: Must be at least a 16 cell
     pub fn center(c: Cell, buf: &[Cell]) -> Cell {
         Cell {
@@ -621,16 +572,6 @@ mod cell_utils {
     }
 
     /// Given two 8 cells `w` and `e`, returns the leaf at their center.
-    /// Visually, if `w` is `-` and `e` is `+`, returns the area shaded `#`
-    ///
-    ///     ----########++++
-    ///     ----########++++
-    ///     ----########++++
-    ///     ----########++++
-    ///     ----########++++
-    ///     ----########++++
-    ///     ----########++++
-    ///     ----########++++
     pub fn h_center8(w: Cell, e: Cell) -> Cell {
         trace!("w: {w:?}");
         trace!("e: {e:?}");
@@ -649,24 +590,6 @@ mod cell_utils {
     }
 
     /// Given two 8 cells `n` and `s`, returns the leaf at their center.
-    /// Visually, if `n` is `-` and `s` is `+`, returns the area shaded `#`
-    ///
-    ///     --------
-    ///     --------
-    ///     --------
-    ///     --------
-    ///     ########
-    ///     ########
-    ///     ########
-    ///     ########
-    ///     ########
-    ///     ########
-    ///     ########
-    ///     ########
-    ///     ++++++++
-    ///     ++++++++
-    ///     ++++++++
-    ///     ++++++++
     pub fn v_center8(n: Cell, s: Cell) -> Cell {
         trace!("n: {n:?}");
         trace!("s: {s:?}");
@@ -690,24 +613,6 @@ mod cell_utils {
     }
 
     /// On a 16 cell, this is its 8x8 center leaf
-    /// Visually, returns the shaded area
-    ///
-    ///     ----------------
-    ///     ----------------
-    ///     ----------------
-    ///     ----------------
-    ///     ----########----
-    ///     ----########----
-    ///     ----########----
-    ///     ----########----
-    ///     ----########----
-    ///     ----########----
-    ///     ----########----
-    ///     ----########----
-    ///     ----------------
-    ///     ----------------
-    ///     ----------------
-    ///     ----------------
     pub fn center16(cell: Cell, buf: &[Cell]) -> Cell {
         assert!(cell.is_16(buf));
 

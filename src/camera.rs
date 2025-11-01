@@ -6,11 +6,13 @@ use crate::ScreenSize;
 use crate::WorldOffset;
 
 /// Hex values of braille dots
-///  
+///
+/// ```rustignore 
 ///      1   8
 ///      2  10
 ///      4  20
 ///     40  80
+/// ```
 ///
 /// Where the base blank pattern is codepoint `0x2800` (or U+2800)
 ///
