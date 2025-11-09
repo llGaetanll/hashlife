@@ -1,7 +1,6 @@
 use thiserror::Error;
 
 use crate::parse_util;
-use crate::parse_util::ParseError;
 
 const NBHD_MASK: u16 = 0b0000_0111_0101_0111;
 const CELL_MASK: u16 = 0b0000_0000_0010_0000;
@@ -171,7 +170,7 @@ impl RuleSet {
 #[derive(Debug, Error)]
 pub enum RuleError {
     #[error("Parse error: {0}")]
-    ParseError(#[from] ParseError),
+    ParseError(#[from] parse_util::ParseError),
 
     #[error("Header rule must contain b or B")]
     NoBirths,
@@ -281,12 +280,13 @@ pub struct RuleExtension {
     pub topology: RuleTopology,
     pub width: RuleSize,
     pub height: RuleSize,
+    pub generation: u64,
 }
 
 #[derive(Debug, Error)]
 pub enum RuleExtensionError {
     #[error("Parse error")]
-    ParseError(#[from] ParseError),
+    ParseError(#[from] parse_util::ParseError),
 
     #[error("Unexpected EOF")]
     UnexpectedEof,
@@ -300,11 +300,17 @@ pub enum RuleExtensionError {
     #[error("Height undefined")]
     NoHeight,
 
+    #[error("Generation undefined")]
+    NoGeneration,
+
     #[error("Failed to parse width. Should be either <number> or *, got: {got}")]
     ParseWidth { got: String },
 
     #[error("Failed to parse height. Should be either <number> or *, got: {got}")]
     ParseHeight { got: String },
+
+    #[error("Failed to parse generation: {0}")]
+    ParseGeneration(#[from] parse_util::ConvertError),
 }
 
 pub(crate) fn parse_rule_extension(
@@ -349,7 +355,14 @@ pub(crate) fn parse_rule_extension(
 
     let bytes = parse_util::expect(b',', bytes)?;
 
-    let (Some(height_bs), bytes) = parse_util::take_until_ws(bytes) else {
+    let height_take_fn = |b: u8| -> bool {
+        b.is_ascii_whitespace()
+
+        // Include generation
+        || b == b'+'
+    };
+
+    let (Some(height_bs), bytes) = parse_util::take_until_fn(height_take_fn, bytes) else {
         return Err(RuleExtensionError::NoHeight);
     };
 
@@ -366,10 +379,27 @@ pub(crate) fn parse_rule_extension(
         }
     };
 
+    let (generation, bytes) = if let Some(b'+') = parse_util::peek_1(bytes) {
+        let Ok(bytes) = parse_util::expect(b'+', bytes) else {
+            unreachable!("We peeked and saw b'+'")
+        };
+
+        let (Some(gen_bs), bytes) = parse_util::take_until_fn(height_take_fn, bytes) else {
+            return Err(RuleExtensionError::NoGeneration);
+        };
+
+        let generation = parse_util::convert(gen_bs)?;
+
+        (generation, bytes)
+    } else {
+        (0, bytes)
+    };
+
     let extension = RuleExtension {
         topology,
         width,
         height,
+        generation,
     };
 
     Ok((extension, bytes))
@@ -402,20 +432,21 @@ mod tests {
         let (rule, bs) = super::parse_rule(rule_bs)?;
 
         insta::assert_debug_snapshot!(rule, @r#"
-            RuleSet {
-                rule: "b3/s23",
-                ext: Some(
-                    RuleExtension {
-                        topology: Torus,
-                        width: Bounded(
-                            100,
-                        ),
-                        height: Bounded(
-                            58,
-                        ),
-                    },
-                ),
-            }
+        RuleSet {
+            rule: "b3/s23",
+            ext: Some(
+                RuleExtension {
+                    topology: Torus,
+                    width: Bounded(
+                        100,
+                    ),
+                    height: Bounded(
+                        58,
+                    ),
+                    generation: 0,
+                },
+            ),
+        }
         "#);
         assert_eq!(bs, b" ");
 
@@ -430,18 +461,48 @@ mod tests {
         let (rule, bs) = super::parse_rule(rule_bs)?;
 
         insta::assert_debug_snapshot!(rule, @r#"
-            RuleSet {
-                rule: "b3/s23",
-                ext: Some(
-                    RuleExtension {
-                        topology: Torus,
-                        width: Bounded(
-                            100,
-                        ),
-                        height: Unbounded,
-                    },
-                ),
-            }
+        RuleSet {
+            rule: "b3/s23",
+            ext: Some(
+                RuleExtension {
+                    topology: Torus,
+                    width: Bounded(
+                        100,
+                    ),
+                    height: Unbounded,
+                    generation: 0,
+                },
+            ),
+        }
+        "#);
+        assert_eq!(bs, b" ");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_rule_with_extension_and_generation() -> Result<(), RuleError> {
+        // NOTE: final whitespace needed since RLE files never end in a rule
+        let rule_bs = b"B3/S23:T100,58+4 ";
+
+        let (rule, bs) = super::parse_rule(rule_bs)?;
+
+        insta::assert_debug_snapshot!(rule, @r#"
+        RuleSet {
+            rule: "b3/s23",
+            ext: Some(
+                RuleExtension {
+                    topology: Torus,
+                    width: Bounded(
+                        100,
+                    ),
+                    height: Bounded(
+                        58,
+                    ),
+                    generation: 4,
+                },
+            ),
+        }
         "#);
         assert_eq!(bs, b" ");
 
