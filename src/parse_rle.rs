@@ -281,7 +281,7 @@ where
         };
 
         match b {
-            b'\r' | b'\n' => {
+            b'\r' | b'\n' | b' ' => {
                 let (_, rest) = parse_util::take_1(bytes);
                 bytes = rest;
             }
