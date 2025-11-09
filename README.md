@@ -77,6 +77,10 @@ TODO
 - [ ] Add simple benchmarks
 - [ ] Add hashing
 
+## RLE format support checklist
+- [ ] Support `LifeHistory` rule & history states
+- [x] Golly extended rule format (i.e. `B3/S23:P0,5`)
+
 ## Further reading
 - [Original Paper by Bill Gosper](https://usr.lmf.cnrs.fr/~jcf/m1/gol/gosper-84.pdf)
 - [Wikipedia](https://en.wikipedia.org/wiki/Hashlife)

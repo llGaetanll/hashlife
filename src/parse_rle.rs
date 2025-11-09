@@ -1,5 +1,3 @@
-use std::str::FromStr;
-use std::str::Utf8Error;
 use thiserror::Error;
 use tracing::warn;
 
@@ -256,7 +254,7 @@ pub enum RleEncodingError {
     UnexpectedEof,
 
     #[error("Failed to convert run length: {0}")]
-    RunLength(#[from] ConvertError),
+    RunLength(#[from] parse_util::ConvertError),
 
     #[error("Unrecognized byte: 0x{got:0X}")]
     UnrecognizedByte { got: u8 },
@@ -336,7 +334,7 @@ where
                     unreachable!("Repeat count cannot be cut off by a new line")
                 };
 
-                rep = convert(n).map_err(RleEncodingError::RunLength)?;
+                rep = parse_util::convert(n).map_err(RleEncodingError::RunLength)?;
             }
 
             b => return Err(RleEncodingError::UnrecognizedByte { got: b }),
@@ -355,13 +353,13 @@ pub enum RleCoordError {
     NoX,
 
     #[error("Failed to parse x coordinate: {0}")]
-    ParseX(#[source] ConvertError),
+    ParseX(#[source] parse_util::ConvertError),
 
     #[error("Expected y coordinate, found end of input")]
     NoY,
 
     #[error("Failed to parse y coordinate: {0}")]
-    ParseY(#[source] ConvertError),
+    ParseY(#[source] parse_util::ConvertError),
 }
 
 fn read_coordinates(bytes: &[u8]) -> Result<((WorldOffset, WorldOffset), &[u8]), RleCoordError> {
@@ -373,7 +371,7 @@ fn read_coordinates(bytes: &[u8]) -> Result<((WorldOffset, WorldOffset), &[u8]),
     let (Some(x_bytes), bytes) = parse_util::take_with(b',', bytes) else {
         return Err(RleCoordError::NoX);
     };
-    let x: WorldOffset = convert(x_bytes).map_err(RleCoordError::ParseX)?;
+    let x: WorldOffset = parse_util::convert(x_bytes).map_err(RleCoordError::ParseX)?;
 
     let bytes = parse_util::take_ws(bytes);
     let bytes = parse_util::expect(b'y', bytes)?;
@@ -386,33 +384,9 @@ fn read_coordinates(bytes: &[u8]) -> Result<((WorldOffset, WorldOffset), &[u8]),
     let (Some(y_bytes), bytes) = parse_util::take_until_fn(p, bytes) else {
         return Err(RleCoordError::NoY);
     };
-    let y: WorldOffset = convert(y_bytes).map_err(RleCoordError::ParseY)?;
+    let y: WorldOffset = parse_util::convert(y_bytes).map_err(RleCoordError::ParseY)?;
 
     Ok(((x, y), bytes))
-}
-
-#[derive(Debug, Error)]
-pub enum ConvertError {
-    #[error("Error parsing bytes from UTF-8: {0}")]
-    InvalidUTF8(Utf8Error),
-
-    #[error("Failed to convert \"{str}\"")]
-    ParseError { str: String },
-}
-
-/// Converts `&[u8]` to `T` if `T: FromStr`.
-fn convert<T: FromStr>(bytes: &[u8]) -> Result<T, ConvertError> {
-    let Ok(str) = str::from_utf8(bytes) else {
-        unreachable!("RLE file is expected to be valid UTF-8")
-    };
-
-    let Ok(res) = str.parse::<T>() else {
-        return Err(ConvertError::ParseError {
-            str: str.to_string(),
-        });
-    };
-
-    Ok(res)
 }
 
 #[cfg(test)]

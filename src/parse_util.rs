@@ -1,3 +1,6 @@
+use std::str::FromStr;
+use std::str::Utf8Error;
+
 use thiserror::Error;
 
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -12,6 +15,9 @@ pub enum ParseError {
 
     #[error("Expected \"{exp}\", but got \"{got}\"")]
     UnexpectedSlice { exp: String, got: String },
+
+    #[error("Unequal inputs. Got \"{left}\" and \"{right}\"")]
+    UnequalInputs { left: String, right: String },
 }
 
 /// Consumes the slice until a non-ascii whitespace character is reached.
@@ -96,6 +102,38 @@ pub fn expect_slice<'a>(bs: &[u8], bytes: &'a [u8]) -> ParseResult<&'a [u8]> {
     }
 }
 
+/// Just like `expect`, except `bytes.len() == 1`.
+///
+/// In other words, checks that `b == bytes`.
+pub fn is(b: u8, bytes: &[u8]) -> ParseResult<()> {
+    expect(b, bytes).and_then(|_| {
+        if bytes.len() == 1 {
+            Ok(())
+        } else {
+            Err(ParseError::UnequalInputs {
+                left: (b as char).to_string(),
+                right: String::from_utf8_lossy(bytes).to_string(),
+            })
+        }
+    })
+}
+
+/// Just like `expect_slice`, except `bs.len() == bytes.len()`.
+///
+/// In other words, checks that `bs == bytes`.
+pub fn is_slice(bs: &[u8], bytes: &[u8]) -> ParseResult<()> {
+    expect_slice(bs, bytes).and_then(|_| {
+        if bs.len() == bytes.len() {
+            Ok(())
+        } else {
+            Err(ParseError::UnequalInputs {
+                left: String::from_utf8_lossy(bs).to_string(),
+                right: String::from_utf8_lossy(bytes).to_string(),
+            })
+        }
+    })
+}
+
 /// Advance the slice until `P` is satisfied, without consuming it.
 #[inline]
 pub fn take_until_fn<P>(p: P, bytes: &[u8]) -> (Option<&[u8]>, &[u8])
@@ -122,7 +160,9 @@ where
     }
 }
 
-/// Advance the slice until byte `b` is found. If `b` is never found, `bytes` is left as-is.
+/// Advance the slice until byte `b` is found, without consuming it.
+///
+/// If `b` is never found, `bytes` is left as-is.
 pub fn take_until(b: u8, bytes: &[u8]) -> (Option<&[u8]>, &[u8]) {
     take_until_fn(|a| a == b, bytes)
 }
@@ -156,4 +196,28 @@ pub fn take_with(b: u8, bytes: &[u8]) -> (Option<&[u8]>, &[u8]) {
     let (_, bytes) = take_1(bytes);
 
     (Some(res), bytes)
+}
+
+#[derive(Debug, Error)]
+pub enum ConvertError {
+    #[error("Error parsing bytes from UTF-8: {0}")]
+    InvalidUTF8(Utf8Error),
+
+    #[error("Failed to convert \"{str}\"")]
+    ParseError { str: String },
+}
+
+/// Converts `&[u8]` to `T` if `T: FromStr`.
+pub fn convert<T: FromStr>(bytes: &[u8]) -> Result<T, ConvertError> {
+    let Ok(str) = str::from_utf8(bytes) else {
+        unreachable!("RLE file is expected to be valid UTF-8")
+    };
+
+    let Ok(res) = str.parse::<T>() else {
+        return Err(ConvertError::ParseError {
+            str: str.to_string(),
+        });
+    };
+
+    Ok(res)
 }
