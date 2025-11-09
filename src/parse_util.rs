@@ -35,6 +35,58 @@ pub fn take_ws(bytes: &[u8]) -> &[u8] {
     &bytes[i..]
 }
 
+/// Like `take_ws` but stops at a linebreak or non-ascii whitespace character. Returns whether any
+/// bytes were consumed.
+///
+/// A linebreak is any of
+/// * `\n`
+/// * `\r`
+/// * `\r\n`
+///
+/// This function completely consumes the linebreak.
+pub fn take_ws_line(bytes: &[u8]) -> (bool, &[u8]) {
+    let mut i = bytes.len();
+
+    for (j, b) in bytes.iter().enumerate() {
+        match b {
+            b'\n' => {
+                i = j + 1;
+
+                break;
+            }
+            b'\r' => {
+                if let Some(b'\n') = peek_1(&bytes[j..]) {
+                    i = j + 2;
+                } else {
+                    i = j + 1;
+                }
+
+                break;
+            }
+            w if w.is_ascii_whitespace() => {}
+            _ => {
+                i = j;
+
+                break;
+            }
+        }
+    }
+
+    let bytes = &bytes[i..];
+    let consumed = i != 0;
+
+    (consumed, bytes)
+}
+
+/// Like `take_ws_line` but consumes as many blank lines as possible
+pub fn take_ws_lines(mut bytes: &[u8]) -> &[u8] {
+    while let (true, rest) = take_ws_line(bytes) {
+        bytes = rest;
+    }
+
+    bytes
+}
+
 /// Takes the next character from the slice. If none is found, the slice is left as-is.
 pub const fn take_1(bytes: &[u8]) -> (Option<u8>, &[u8]) {
     let [b, bytes @ ..] = bytes else {
