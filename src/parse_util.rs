@@ -22,7 +22,7 @@ pub enum ParseError {
 
 /// Consumes the slice until a non-ascii whitespace character is reached.
 pub fn take_ws(bytes: &[u8]) -> &[u8] {
-    let mut i = bytes.len() - 1;
+    let mut i = bytes.len();
     for (j, b) in bytes.iter().enumerate() {
         if b.is_ascii_whitespace() {
             continue;
@@ -220,4 +220,16 @@ pub fn convert<T: FromStr>(bytes: &[u8]) -> Result<T, ConvertError> {
     };
 
     Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_take_ws_full_ws() {
+        let bytes = b"  ";
+
+        let res = super::take_ws(bytes);
+
+        assert_eq!(res, b"")
+    }
 }
