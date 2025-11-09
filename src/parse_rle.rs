@@ -300,7 +300,7 @@ where
             }
 
             // Live cell
-            b'o' => {
+            b'o' | b'x' | b'y' | b'z' => {
                 let (_, rest) = parse_util::take_1(bytes);
                 bytes = rest;
 
