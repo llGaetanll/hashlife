@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::str::Utf8Error;
 use thiserror::Error;
+use tracing::warn;
 
 use crate::WorldOffset;
 use crate::parse_util::ParseError;
@@ -28,15 +29,6 @@ pub enum RleError {
 
     #[error("Encoding error: {0}")]
     Encoding(#[from] RleEncodingError),
-
-    #[error("RLE file name already defined")]
-    MultipleFileNames,
-
-    #[error("RLE file author already defined")]
-    MultipleAuthors,
-
-    #[error("RLE file offset already defined")]
-    MultipleOffsets,
 }
 
 /// Parse the RLE file format. Assumes the bytes are valid Ascii.
@@ -57,21 +49,21 @@ where
             RleCommentLine::Comment => {}
             RleCommentLine::Name { name } => {
                 if file.name.is_some() {
-                    return Err(RleError::MultipleFileNames);
+                    warn!("RLE file name already defined. Using latest");
                 }
 
                 file.name = Some(name);
             }
             RleCommentLine::Author { author } => {
                 if file.author.is_some() {
-                    return Err(RleError::MultipleAuthors);
+                    warn!("RLE author already defined. Using latest");
                 }
 
                 file.author = Some(author);
             }
             RleCommentLine::Offset { x, y } => {
                 if file.offset.is_some() {
-                    return Err(RleError::MultipleOffsets);
+                    warn!("RLE offset already defined. Using latest");
                 }
 
                 file.offset = Some((x, y))
@@ -89,7 +81,7 @@ where
     if let (Some(header), rest) = res {
         let RleHeaderLine { x, y, .. } = header;
         if file.offset.is_some() {
-            return Err(RleError::MultipleOffsets);
+            warn!("RLE offset already defined. Using latest");
         }
 
         file.offset = Some((x, y));
