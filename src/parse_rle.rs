@@ -230,7 +230,8 @@ fn read_line_header(bytes: &[u8]) -> Result<(Option<RleHeaderLine>, &[u8]), RleH
             let bytes = parse_util::expect(b'=', bytes)?;
             let bytes = parse_util::take_ws(bytes);
 
-            let (rule, bytes) = rule_set::parse_rule(bytes)?;
+            let (rule, bytes) =
+                rule_set::parse_rule(bytes).or_else(|_| rule_set::parse_nameless_rule(bytes))?;
 
             let line = RleHeaderLine {
                 x,
