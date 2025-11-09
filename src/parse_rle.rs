@@ -32,16 +32,21 @@ pub enum RleError {
 /// Parse the RLE file format. Assumes the bytes are valid Ascii.
 ///
 /// See: https://conwaylife.com/wiki/Run_Length_Encoded
-pub fn read_rle<F>(mut bytes: &'_ [u8], f: F) -> Result<RleFile<'_>, RleError>
+pub fn read_rle<F>(bytes: &'_ [u8], f: F) -> Result<RleFile<'_>, RleError>
 where
     F: FnMut(WorldOffset, WorldOffset),
 {
     let mut file = RleFile::default();
 
+    let mut bytes = parse_util::take_ws_lines(bytes);
+
     // Parse as many comment lines as possible
     loop {
-        let res = read_line_comment(bytes)?;
-        let (Some(line), rest) = res else { break };
+        let (Some(line), rest) = read_line_comment(bytes)? else {
+            break;
+        };
+
+        let rest = parse_util::take_ws_lines(rest);
 
         match line {
             RleCommentLine::Comment => {}
@@ -75,8 +80,7 @@ where
     }
 
     // Parse header line, if it's present
-    let res = read_line_header(bytes)?;
-    if let (Some(header), rest) = res {
+    if let (Some(header), rest) = read_line_header(bytes)? {
         let RleHeaderLine { x, y, .. } = header;
         if file.offset.is_some() {
             warn!("RLE offset already defined. Using latest");
@@ -87,6 +91,8 @@ where
     }
 
     let (dx, dy) = file.offset.unwrap_or_default();
+
+    let bytes = parse_util::take_ws_lines(bytes);
 
     // Parse encoding
     read_encoding(bytes, dx, dy, f)?;
