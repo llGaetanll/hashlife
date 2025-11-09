@@ -228,8 +228,11 @@ fn read_line_header(bytes: &[u8]) -> Result<(Option<RleHeaderLine>, &[u8]), RleH
             let bytes = parse_util::expect(b'=', bytes)?;
             let bytes = parse_util::take_ws(bytes);
 
-            let (rule, bytes) =
-                rule_set::parse_rule(bytes).or_else(|_| rule_set::parse_nameless_rule(bytes))?;
+            let (rule, bytes) = match rule_set::parse_rule(bytes) {
+                Ok((rule, bytes)) => (rule, bytes),
+                Err(RuleError::NoBirths) => rule_set::parse_nameless_rule(bytes)?,
+                Err(err) => return Err(err.into()),
+            };
 
             let line = RleHeaderLine {
                 x,
@@ -392,7 +395,7 @@ fn read_coordinates(bytes: &[u8]) -> Result<((WorldOffset, WorldOffset), &[u8]),
 #[cfg(test)]
 mod test {
     #[test]
-    fn read_coordinates() {
+    fn test_read_coordinates() {
         let bytes = b"x = 1, y = 1\n";
         super::read_coordinates(bytes.as_slice()).unwrap();
     }
