@@ -1,7 +1,7 @@
-use anyhow::bail;
-use anyhow::Context;
+use thiserror::Error;
 
 use crate::parse_util;
+use crate::parse_util::ParseError;
 
 const NBHD_MASK: u16 = 0b0000_0111_0101_0111;
 const CELL_MASK: u16 = 0b0000_0000_0010_0000;
@@ -125,57 +125,87 @@ impl RuleSet {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum RuleError {
+    #[error("Header rule must contain b or B")]
+    NoBirths,
+
+    #[error("Some number of births is required")]
+    NoBirthsCount,
+
+    #[error("Parse error")]
+    ParseError(#[source] ParseError),
+
+    #[error("Header rule must contain s or S")]
+    NoSurvivals,
+
+    #[error("Some number of survivals is required")]
+    NoSurvivalsCount,
+
+    #[error("Birth count should only contain digits")]
+    BirthCountContainsNonDigits,
+
+    #[error("Survival count should only contain digits")]
+    SurvivalCountContainsNonDigits,
+}
+
+impl From<ParseError> for RuleError {
+    fn from(value: ParseError) -> Self {
+        RuleError::ParseError(value)
+    }
+}
+
 // Parse rules that look like b3/s23
-pub(crate) fn parse_rule(bytes: &[u8]) -> parse_util::ParseResult<(RuleSet, &[u8])> {
+pub(crate) fn parse_rule(bytes: &[u8]) -> Result<(RuleSet, &[u8]), RuleError> {
     let (Some(b'b' | b'B'), bytes) = parse_util::take_1(bytes) else {
-        bail!("Header rule contains b or B")
+        return Err(RuleError::NoBirths);
     };
 
     let (Some(b), bytes) = parse_util::take_until(b'/', bytes) else {
-        bail!("Some number of births is required")
+        return Err(RuleError::NoBirthsCount);
     };
 
     let bytes = parse_util::expect(b'/', bytes)?;
 
     let (Some(b's' | b'S'), bytes) = parse_util::take_1(bytes) else {
-        bail!("Header rule contains s or S")
+        return Err(RuleError::NoSurvivals);
     };
 
     let (Some(s), bytes) = parse_util::take_until_ws(bytes) else {
-        bail!("Some number of births is required")
+        return Err(RuleError::NoSurvivalsCount);
     };
 
-    let b = bytes_to_num(b).context("Failed to convert births")?;
-    let s = bytes_to_num(s).context("Failed to convert survivals")?;
+    let b = bytes_to_num(b).map_err(|_| RuleError::BirthCountContainsNonDigits)?;
+    let s = bytes_to_num(s).map_err(|_| RuleError::SurvivalCountContainsNonDigits)?;
 
     Ok((RuleSet::new(b, s), bytes))
 }
 
 // Parse rules that look like 3/23. These show up in RLE #r comment lines.
-pub(crate) fn parse_nameless_rule(bytes: &[u8]) -> parse_util::ParseResult<(RuleSet, &[u8])> {
+pub(crate) fn parse_nameless_rule(bytes: &[u8]) -> Result<(RuleSet, &[u8]), RuleError> {
     let (Some(b), bytes) = parse_util::take_until(b'/', bytes) else {
-        bail!("Some number of births is required")
+        return Err(RuleError::NoBirthsCount);
     };
 
     let bytes = parse_util::expect(b'/', bytes)?;
 
     let (Some(s), bytes) = parse_util::take_until_ws(bytes) else {
-        bail!("Some number of births is required")
+        return Err(RuleError::NoSurvivalsCount);
     };
 
-    let b = bytes_to_num(b).context("Failed to convert births")?;
-    let s = bytes_to_num(s).context("Failed to convert survivals")?;
+    let b = bytes_to_num(b).map_err(|_| RuleError::BirthCountContainsNonDigits)?;
+    let s = bytes_to_num(s).map_err(|_| RuleError::SurvivalCountContainsNonDigits)?;
 
     Ok((RuleSet::new(b, s), bytes))
 }
 
 /// Convert the human readable birth/survival number to a packed bit representation
-fn bytes_to_num(bytes: &[u8]) -> anyhow::Result<u16> {
+fn bytes_to_num(bytes: &[u8]) -> Result<u16, ()> {
     let mut n = 0;
 
     for &b in bytes {
         if !b.is_ascii_digit() {
-            bail!("expected digits only")
+            return Err(());
         }
 
         n |= 1 << (b - b'0');

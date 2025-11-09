@@ -1,10 +1,12 @@
-use anyhow::bail;
-use anyhow::Context;
+use std::str::FromStr;
+use std::str::Utf8Error;
+use thiserror::Error;
 
-use crate::parse_util::ParseResult;
-use crate::rule_set;
-use crate::rule_set::RuleSet;
 use crate::WorldOffset;
+use crate::parse_util::ParseError;
+use crate::rule_set;
+use crate::rule_set::RuleError;
+use crate::rule_set::RuleSet;
 
 use crate::parse_util;
 
@@ -16,10 +18,31 @@ pub struct RleFile<'a> {
     pub set: RuleSet,
 }
 
+#[derive(Debug, Error)]
+pub enum RleError {
+    #[error("Comment line error: {0}")]
+    CommentLine(#[from] RleCommentLineError),
+
+    #[error("Header line error: {0}")]
+    HeaderLine(#[from] RleHeaderLineError),
+
+    #[error("Encoding error: {0}")]
+    Encoding(#[from] RleEncodingError),
+
+    #[error("RLE file name already defined")]
+    MultipleFileNames,
+
+    #[error("RLE file author already defined")]
+    MultipleAuthors,
+
+    #[error("RLE file offset already defined")]
+    MultipleOffsets,
+}
+
 /// Parse the RLE file format. Assumes the bytes are valid Ascii.
 ///
 /// See: https://conwaylife.com/wiki/Run_Length_Encoded
-pub fn read_rle<F>(mut bytes: &'_ [u8], f: F) -> ParseResult<RleFile<'_>>
+pub fn read_rle<F>(mut bytes: &'_ [u8], f: F) -> Result<RleFile<'_>, RleError>
 where
     F: FnMut(WorldOffset, WorldOffset),
 {
@@ -27,28 +50,28 @@ where
 
     // Parse as many comment lines as possible
     loop {
-        let res = read_line_comment(bytes).context("Failed to read comment line")?;
+        let res = read_line_comment(bytes)?;
         let (Some(line), rest) = res else { break };
 
         match line {
             RleCommentLine::Comment => {}
             RleCommentLine::Name { name } => {
                 if file.name.is_some() {
-                    bail!("Rle file name already defined")
+                    return Err(RleError::MultipleFileNames);
                 }
 
                 file.name = Some(name);
             }
             RleCommentLine::Author { author } => {
                 if file.author.is_some() {
-                    bail!("Rle file author already defined")
+                    return Err(RleError::MultipleAuthors);
                 }
 
                 file.author = Some(author);
             }
             RleCommentLine::Offset { x, y } => {
                 if file.offset.is_some() {
-                    bail!("Rle file offset already defined")
+                    return Err(RleError::MultipleOffsets);
                 }
 
                 file.offset = Some((x, y))
@@ -62,11 +85,11 @@ where
     }
 
     // Parse header line, if it's present
-    let res = read_line_header(bytes).context("Failed to read header line")?;
+    let res = read_line_header(bytes)?;
     if let (Some(header), rest) = res {
         let RleHeaderLine { x, y, .. } = header;
         if file.offset.is_some() {
-            bail!("Rle file offset already defined")
+            return Err(RleError::MultipleOffsets);
         }
 
         file.offset = Some((x, y));
@@ -76,7 +99,7 @@ where
     let (dx, dy) = file.offset.unwrap_or_default();
 
     // Parse encoding
-    read_encoding(bytes, dx, dy, f).context("Failed to read encoding")?;
+    read_encoding(bytes, dx, dy, f)?;
 
     Ok(file)
 }
@@ -89,16 +112,37 @@ enum RleCommentLine<'a> {
     RuleSet { set: RuleSet },
 }
 
+#[derive(Debug, Error)]
+pub enum RleCommentLineError {
+    #[error("No comment type")]
+    NoType,
+
+    #[error("Empty name line")]
+    EmptyName,
+
+    #[error("Empty author line")]
+    EmptyAuthor,
+
+    #[error("Invalid rule: {0}")]
+    InvalidRule(#[from] RuleError),
+
+    #[error("Invalid coordinates: {0}")]
+    InvalidCoord(#[from] RleCoordError),
+
+    #[error("Invalid comment type, found '{got}'")]
+    InvalidType { got: char },
+}
+
 /// Attempt to parse a comment line, otherwise leaves `bytes` as-is.
 fn read_line_comment(
     bytes: &'_ [u8],
-) -> parse_util::ParseResult<(Option<RleCommentLine<'_>>, &'_ [u8])> {
+) -> Result<(Option<RleCommentLine<'_>>, &'_ [u8]), RleCommentLineError> {
     let Ok(bytes) = parse_util::expect(b'#', bytes) else {
         return Ok((None, bytes));
     };
 
     let (Some(b), bytes) = parse_util::take_1(bytes) else {
-        bail!("No comment type");
+        return Err(RleCommentLineError::NoType);
     };
 
     match b {
@@ -113,7 +157,7 @@ fn read_line_comment(
         b'N' => {
             let bytes = parse_util::take_ws(bytes);
             let (Some(name), bytes) = parse_util::take_with(b'\n', bytes) else {
-                bail!("Empty name line")
+                return Err(RleCommentLineError::EmptyName);
             };
 
             let line = RleCommentLine::Name { name };
@@ -125,7 +169,7 @@ fn read_line_comment(
         b'O' => {
             let bytes = parse_util::take_ws(bytes);
             let (Some(author), bytes) = parse_util::take_with(b'\n', bytes) else {
-                bail!("Empty author line")
+                return Err(RleCommentLineError::EmptyAuthor);
             };
 
             let line = RleCommentLine::Author { author };
@@ -136,9 +180,7 @@ fn read_line_comment(
         // Pattern offset
         b'R' | b'P' => {
             let bytes = parse_util::take_ws(bytes);
-            let Ok(((x, y), bytes)) = read_coordinates(bytes) else {
-                bail!("Invalid coordinates")
-            };
+            let ((x, y), bytes) = read_coordinates(bytes)?;
 
             let line = RleCommentLine::Offset { x, y };
 
@@ -148,8 +190,7 @@ fn read_line_comment(
         // Pattern rules
         b'r' => {
             let bytes = parse_util::take_ws(bytes);
-            let (rule, bytes) =
-                rule_set::parse_nameless_rule(bytes).context("Failed to parse comment rule")?;
+            let (rule, bytes) = rule_set::parse_nameless_rule(bytes)?;
             let bytes = parse_util::take_ws(bytes);
 
             let line = RleCommentLine::RuleSet { set: rule };
@@ -157,9 +198,7 @@ fn read_line_comment(
             Ok((Some(line), bytes))
         }
 
-        b => {
-            bail!("Unrecognized comment type '{}'", b as char)
-        }
+        b => Err(RleCommentLineError::InvalidType { got: b as char }),
     }
 }
 
@@ -169,8 +208,20 @@ struct RleHeaderLine {
     set: Option<RuleSet>,
 }
 
+#[derive(Debug, Error)]
+pub enum RleHeaderLineError {
+    #[error("Parse error: {0}")]
+    ParseError(#[from] ParseError),
+
+    #[error("Invalid token: expected ',' or '\n', found '{got}'")]
+    InvalidToken { got: char },
+
+    #[error("Invalid rule: {0}")]
+    InvalidRule(#[from] RuleError),
+}
+
 /// Attempt to parse a header line, otherwise leaves `bytes` as-is.
-fn read_line_header(bytes: &[u8]) -> parse_util::ParseResult<(Option<RleHeaderLine>, &[u8])> {
+fn read_line_header(bytes: &[u8]) -> Result<(Option<RleHeaderLine>, &[u8]), RleHeaderLineError> {
     let Ok(((x, y), bytes)) = read_coordinates(bytes) else {
         return Ok((None, bytes));
     };
@@ -187,8 +238,7 @@ fn read_line_header(bytes: &[u8]) -> parse_util::ParseResult<(Option<RleHeaderLi
             let bytes = parse_util::expect(b'=', bytes)?;
             let bytes = parse_util::take_ws(bytes);
 
-            let (rule, bytes) =
-                rule_set::parse_rule(bytes).context("Failed to parse header rule")?;
+            let (rule, bytes) = rule_set::parse_rule(bytes)?;
 
             let line = RleHeaderLine {
                 x,
@@ -203,8 +253,20 @@ fn read_line_header(bytes: &[u8]) -> parse_util::ParseResult<(Option<RleHeaderLi
 
             Ok((Some(line), bytes))
         }
-        b => bail!("Invalid token: expected ',' or '\n', found '{}'", b as char),
+        b => Err(RleHeaderLineError::InvalidToken { got: b as char }),
     }
+}
+
+#[derive(Debug, Error)]
+pub enum RleEncodingError {
+    #[error("Unexpected EOF")]
+    UnexpectedEof,
+
+    #[error("Failed to convert run length: {0}")]
+    RunLength(#[from] ConvertError),
+
+    #[error("Unrecognized byte: 0x{got:0X}")]
+    UnrecognizedByte { got: u8 },
 }
 
 fn read_encoding<F>(
@@ -212,7 +274,7 @@ fn read_encoding<F>(
     dx: WorldOffset,
     dy: WorldOffset,
     mut f: F,
-) -> parse_util::ParseResult<()>
+) -> Result<(), RleEncodingError>
 where
     F: FnMut(WorldOffset, WorldOffset),
 {
@@ -222,7 +284,7 @@ where
 
     loop {
         let Some(b) = parse_util::peek_1(bytes) else {
-            bail!("Unexpected end of input")
+            return Err(RleEncodingError::UnexpectedEof);
         };
 
         match b {
@@ -278,29 +340,47 @@ where
                 bytes = rest;
 
                 if let Some(b'\n') = parse_util::peek_1(bytes) {
-                    bail!("Repeat count cannot be cut off by a new line")
+                    unreachable!("Repeat count cannot be cut off by a new line")
                 };
 
-                rep = parse_util::convert(n).context("Failed to convert run length")?;
+                rep = convert(n).map_err(RleEncodingError::RunLength)?;
             }
 
-            b => bail!("Unrecognized character '{}'", b as char),
+            b => return Err(RleEncodingError::UnrecognizedByte { got: b }),
         }
     }
 
     Ok(())
 }
 
-fn read_coordinates(bytes: &[u8]) -> parse_util::ParseResult<((WorldOffset, WorldOffset), &[u8])> {
+#[derive(Debug, Error)]
+pub enum RleCoordError {
+    #[error("Parse error: {0}")]
+    ParseError(#[from] ParseError),
+
+    #[error("Expected x coordinate, found end of input")]
+    NoX,
+
+    #[error("Failed to parse x coordinate: {0}")]
+    ParseX(#[source] ConvertError),
+
+    #[error("Expected y coordinate, found end of input")]
+    NoY,
+
+    #[error("Failed to parse y coordinate: {0}")]
+    ParseY(#[source] ConvertError),
+}
+
+fn read_coordinates(bytes: &[u8]) -> Result<((WorldOffset, WorldOffset), &[u8]), RleCoordError> {
     let bytes = parse_util::expect(b'x', bytes)?;
     let bytes = parse_util::take_ws(bytes);
     let bytes = parse_util::expect(b'=', bytes)?;
     let bytes = parse_util::take_ws(bytes);
 
     let (Some(x_bytes), bytes) = parse_util::take_with(b',', bytes) else {
-        bail!("Expected x coordinate, found end of input")
+        return Err(RleCoordError::NoX);
     };
-    let x: WorldOffset = parse_util::convert(x_bytes).context("Failed to parse x offset")?;
+    let x: WorldOffset = convert(x_bytes).map_err(RleCoordError::ParseX)?;
 
     let bytes = parse_util::take_ws(bytes);
     let bytes = parse_util::expect(b'y', bytes)?;
@@ -311,11 +391,35 @@ fn read_coordinates(bytes: &[u8]) -> parse_util::ParseResult<((WorldOffset, Worl
     // Coordinates can be terminated with either `,` or `\n`.
     let p = |b| b == b',' || b == b'\n';
     let (Some(y_bytes), bytes) = parse_util::take_until_fn(p, bytes) else {
-        bail!("Expected y coordinate, found end of input")
+        return Err(RleCoordError::NoY);
     };
-    let y: WorldOffset = parse_util::convert(y_bytes).context("Failed to parse y offset")?;
+    let y: WorldOffset = convert(y_bytes).map_err(RleCoordError::ParseY)?;
 
     Ok(((x, y), bytes))
+}
+
+#[derive(Debug, Error)]
+pub enum ConvertError {
+    #[error("Error parsing bytes from UTF-8: {0}")]
+    InvalidUTF8(Utf8Error),
+
+    #[error("Failed to convert \"{str}\"")]
+    ParseError { str: String },
+}
+
+/// Converts `&[u8]` to `T` if `T: FromStr`.
+fn convert<T: FromStr>(bytes: &[u8]) -> Result<T, ConvertError> {
+    let Ok(str) = str::from_utf8(bytes) else {
+        unreachable!("RLE file is expected to be valid UTF-8")
+    };
+
+    let Ok(res) = str.parse::<T>() else {
+        return Err(ConvertError::ParseError {
+            str: str.to_string(),
+        });
+    };
+
+    Ok(res)
 }
 
 #[cfg(test)]

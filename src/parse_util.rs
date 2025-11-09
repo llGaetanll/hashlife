@@ -1,8 +1,18 @@
-use std::str::FromStr;
+use thiserror::Error;
 
-use anyhow::bail;
+pub type ParseResult<T> = Result<T, ParseError>;
 
-pub type ParseResult<T> = anyhow::Result<T>;
+#[derive(Error, Debug)]
+pub enum ParseError {
+    #[error("Unexpected end of file, expected '{exp}'")]
+    UnexpectedEof { exp: char },
+
+    #[error("Expected '{exp}', but got '{got}'")]
+    UnexpectedToken { exp: char, got: char },
+
+    #[error("Expected \"{exp}\", but got \"{got}\"")]
+    UnexpectedSlice { exp: String, got: String },
+}
 
 /// Consumes the slice until a non-ascii whitespace character is reached.
 pub fn take_ws(bytes: &[u8]) -> &[u8] {
@@ -56,11 +66,14 @@ pub const fn peek_n(bytes: &[u8], n: usize) -> Option<&[u8]> {
 /// Expects the next character in `bytes` to be `b`. Otherwise leaves `bytes` unchanged.
 pub fn expect(b: u8, bytes: &[u8]) -> ParseResult<&[u8]> {
     let (Some(a), bytes) = take_1(bytes) else {
-        bail!("Expected '{}', found end of input", b as char)
+        return Err(ParseError::UnexpectedEof { exp: b as char });
     };
 
     if a != b {
-        bail!("Expected '{}', found '{}'", b as char, a as char)
+        return Err(ParseError::UnexpectedToken {
+            exp: b as char,
+            got: a as char,
+        });
     }
 
     Ok(bytes)
@@ -76,11 +89,10 @@ pub fn expect_slice<'a>(bs: &[u8], bytes: &'a [u8]) -> ParseResult<&'a [u8]> {
     } else {
         let n = bs.len().min(bytes.len());
 
-        bail!(
-            "Expected \"{}\", found \"{}\"",
-            String::from_utf8_lossy(bs),
-            String::from_utf8_lossy(&bytes[..n]),
-        )
+        Err(ParseError::UnexpectedSlice {
+            exp: String::from_utf8_lossy(bs).to_string(),
+            got: String::from_utf8_lossy(&bytes[..n]).to_string(),
+        })
     }
 }
 
@@ -144,15 +156,4 @@ pub fn take_with(b: u8, bytes: &[u8]) -> (Option<&[u8]>, &[u8]) {
     let (_, bytes) = take_1(bytes);
 
     (Some(res), bytes)
-}
-
-/// Converts `&[u8]` to `T` if `T: FromStr`.
-pub fn convert<T: FromStr>(bytes: &[u8]) -> ParseResult<T> {
-    let str = str::from_utf8(bytes)?;
-
-    let Ok(res) = str.parse::<T>() else {
-        bail!("Failed to convert bytes: '{str}'")
-    };
-
-    Ok(res)
 }
