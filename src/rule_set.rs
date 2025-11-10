@@ -269,17 +269,11 @@ pub enum RuleTopology {
     Cylindrical,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum RuleSize {
-    Bounded(u32),
-    Unbounded,
-}
-
 #[derive(Debug, Clone)]
 pub struct RuleExtension {
     pub topology: RuleTopology,
-    pub width: RuleSize,
-    pub height: RuleSize,
+    pub width: u32,
+    pub height: u32,
     pub generation: u64,
 }
 
@@ -336,25 +330,6 @@ pub(crate) fn parse_rule_extension(
         b => return Err(RuleExtensionError::UnrecognizedTopology { got: b as char }),
     };
 
-    let (Some(width_bs), bytes) = parse_util::take_until(b',', bytes) else {
-        return Err(RuleExtensionError::NoWidth);
-    };
-
-    let width = match parse_util::convert(width_bs) {
-        Ok(width) => RuleSize::Bounded(width),
-        Err(_) => {
-            if parse_util::is(b'*', width_bs).is_ok() {
-                RuleSize::Unbounded
-            } else {
-                return Err(RuleExtensionError::ParseWidth {
-                    got: String::from_utf8_lossy(width_bs).to_string(),
-                });
-            }
-        }
-    };
-
-    let bytes = parse_util::expect(b',', bytes)?;
-
     let height_take_fn = |b: u8| -> bool {
         b.is_ascii_whitespace()
 
@@ -362,47 +337,117 @@ pub(crate) fn parse_rule_extension(
         || b == b'+'
     };
 
-    let (Some(height_bs), bytes) = parse_util::take_until_fn(height_take_fn, bytes) else {
-        return Err(RuleExtensionError::NoHeight);
-    };
+    match topology {
+        RuleTopology::Planar | RuleTopology::Torus | RuleTopology::Cylindrical => {
+            let (Some(width_bs), bytes) = parse_util::take_until(b',', bytes) else {
+                return Err(RuleExtensionError::NoWidth);
+            };
+            let width = parse_util::convert(width_bs)?;
 
-    let height = match parse_util::convert(height_bs) {
-        Ok(height) => RuleSize::Bounded(height),
-        Err(_) => {
-            if parse_util::is(b'*', height_bs).is_ok() {
-                RuleSize::Unbounded
-            } else {
-                return Err(RuleExtensionError::ParseHeight {
-                    got: String::from_utf8_lossy(height_bs).to_string(),
-                });
-            }
+            let bytes = parse_util::expect(b',', bytes)?;
+
+            let (Some(height_bs), bytes) = parse_util::take_until_fn(height_take_fn, bytes) else {
+                return Err(RuleExtensionError::NoHeight);
+            };
+            let height = parse_util::convert(height_bs)?;
+
+            let (generation, bytes) = parse_rule_extension_generation(bytes)?;
+
+            let extension = RuleExtension {
+                topology,
+                width,
+                height,
+                generation,
+            };
+
+            Ok((extension, bytes))
         }
-    };
+        RuleTopology::Spherical => {
+            let (Some(size_bs), bytes) = parse_util::take_until_fn(height_take_fn, bytes) else {
+                return Err(RuleExtensionError::NoHeight);
+            };
 
-    let (generation, bytes) = if let Some(b'+') = parse_util::peek_1(bytes) {
+            let size = parse_util::convert(size_bs)?;
+
+            let (generation, bytes) = parse_rule_extension_generation(bytes)?;
+
+            let extension = RuleExtension {
+                topology,
+                width: size,
+                height: size,
+                generation,
+            };
+
+            Ok((extension, bytes))
+        }
+        RuleTopology::KleinBottle => {
+            let width_take_fn = |b: u8| -> bool { b == b',' || b == b'*' };
+            let (Some(width_bs), bytes) = parse_util::take_until_fn(width_take_fn, bytes) else {
+                return Err(RuleExtensionError::NoWidth);
+            };
+            let width = parse_util::convert(width_bs)?;
+
+            // TODO: We parse which axis is flipped but don't keep track of it
+            let (_flip, bytes) = if let Some(b'*') = parse_util::peek_1(bytes) {
+                let Ok(bytes) = parse_util::expect(b'*', bytes) else {
+                    unreachable!("We peeked and saw b'*'")
+                };
+
+                (true, bytes)
+            } else {
+                (false, bytes)
+            };
+
+            let bytes = parse_util::expect(b',', bytes)?;
+
+            let height_take_fn =
+                |b: u8| -> bool { b == b'*' || b == b'+' || b.is_ascii_whitespace() };
+            let (Some(height_bs), bytes) = parse_util::take_until_fn(height_take_fn, bytes) else {
+                return Err(RuleExtensionError::NoWidth);
+            };
+            let height = parse_util::convert(height_bs)?;
+
+            // TODO: We parse which axis is flipped but don't keep track of it
+            let (_flip, bytes) = if let Some(b'*') = parse_util::peek_1(bytes) {
+                let Ok(bytes) = parse_util::expect(b'*', bytes) else {
+                    unreachable!("We peeked and saw b'*'")
+                };
+
+                (true, bytes)
+            } else {
+                (false, bytes)
+            };
+
+            let (generation, bytes) = parse_rule_extension_generation(bytes)?;
+
+            let extension = RuleExtension {
+                topology,
+                width,
+                height,
+                generation,
+            };
+
+            Ok((extension, bytes))
+        }
+    }
+}
+
+fn parse_rule_extension_generation(bytes: &[u8]) -> Result<(u64, &[u8]), RuleExtensionError> {
+    if let Some(b'+') = parse_util::peek_1(bytes) {
         let Ok(bytes) = parse_util::expect(b'+', bytes) else {
             unreachable!("We peeked and saw b'+'")
         };
 
-        let (Some(gen_bs), bytes) = parse_util::take_until_fn(height_take_fn, bytes) else {
+        let (Some(gen_bs), bytes) = parse_util::take_until_ws(bytes) else {
             return Err(RuleExtensionError::NoGeneration);
         };
 
         let generation = parse_util::convert(gen_bs)?;
 
-        (generation, bytes)
+        Ok((generation, bytes))
     } else {
-        (0, bytes)
-    };
-
-    let extension = RuleExtension {
-        topology,
-        width,
-        height,
-        generation,
-    };
-
-    Ok((extension, bytes))
+        Ok((0, bytes))
+    }
 }
 
 /// Convert the human readable birth/survival number to a packed bit representation
@@ -437,39 +482,8 @@ mod tests {
             ext: Some(
                 RuleExtension {
                     topology: Torus,
-                    width: Bounded(
-                        100,
-                    ),
-                    height: Bounded(
-                        58,
-                    ),
-                    generation: 0,
-                },
-            ),
-        }
-        "#);
-        assert_eq!(bs, b" ");
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_rule_with_unbounded_extension() -> Result<(), RuleError> {
-        // NOTE: final whitespace needed since RLE files never end in a rule
-        let rule_bs = b"B3/S23:T100,* ";
-
-        let (rule, bs) = super::parse_rule(rule_bs)?;
-
-        insta::assert_debug_snapshot!(rule, @r#"
-        RuleSet {
-            rule: "b3/s23",
-            ext: Some(
-                RuleExtension {
-                    topology: Torus,
-                    width: Bounded(
-                        100,
-                    ),
-                    height: Unbounded,
+                    width: 100,
+                    height: 58,
                     generation: 0,
                 },
             ),
@@ -493,13 +507,35 @@ mod tests {
             ext: Some(
                 RuleExtension {
                     topology: Torus,
-                    width: Bounded(
-                        100,
-                    ),
-                    height: Bounded(
-                        58,
-                    ),
+                    width: 100,
+                    height: 58,
                     generation: 4,
+                },
+            ),
+        }
+        "#);
+        assert_eq!(bs, b" ");
+
+        Ok(())
+    }
+
+    #[test]
+    /// The Klein Bottle extension makes use of `*` to indicate which side should be twisted
+    fn test_rule_with_klein_bottle_extension() -> Result<(), RuleError> {
+        // NOTE: final whitespace needed since RLE files never end in a rule
+        let rule_bs = b"B3/S23:K100*,100 ";
+
+        let (rule, bs) = super::parse_rule(rule_bs)?;
+
+        insta::assert_debug_snapshot!(rule, @r#"
+        RuleSet {
+            rule: "b3/s23",
+            ext: Some(
+                RuleExtension {
+                    topology: KleinBottle,
+                    width: 100,
+                    height: 100,
+                    generation: 0,
                 },
             ),
         }
