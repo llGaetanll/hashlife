@@ -1,3 +1,4 @@
+use hashlife::rle_data::RleSink;
 use hashlife::rle_file;
 
 #[test]
@@ -6,11 +7,13 @@ fn test_patterns() -> anyhow::Result<()> {
     let mut tested = 0;
     let mut failed = Vec::new();
 
+    let mut sink = RleSink;
+
     for entry in pattern_dir {
         let path = entry?.path();
         let bytes = std::fs::read(&path)?;
 
-        match rle_file::read_rle(&bytes, |_x, _y| {}) {
+        match rle_file::read_rle(&bytes, &mut sink) {
             Ok(_) => tested += 1,
             Err(e) => failed.push((path.clone(), e)),
         }

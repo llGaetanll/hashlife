@@ -2,6 +2,7 @@ use thiserror::Error;
 use tracing::warn;
 
 use crate::WorldOffset;
+use crate::rle_data::RleBufWrite;
 use crate::rule_set;
 use crate::rule_set::RuleError;
 use crate::rule_set::RuleSet;
@@ -10,7 +11,7 @@ use crate::util_parse::ParseError;
 use crate::util_parse;
 
 #[derive(Default)]
-pub struct RleFile<'a> {
+pub struct RleHeader<'a> {
     pub name: Option<&'a [u8]>,
     pub author: Option<&'a [u8]>,
     pub offset: Option<(WorldOffset, WorldOffset)>,
@@ -32,11 +33,11 @@ pub enum RleError {
 /// Parse the RLE file format. Assumes the bytes are valid Ascii.
 ///
 /// See: https://conwaylife.com/wiki/Run_Length_Encoded
-pub fn read_rle<F>(bytes: &'_ [u8], f: F) -> Result<RleFile<'_>, RleError>
-where
-    F: FnMut(WorldOffset, WorldOffset),
-{
-    let mut file = RleFile::default();
+pub fn read_rle<'a>(
+    bytes: &'a [u8],
+    buf: &'a mut dyn RleBufWrite,
+) -> Result<RleHeader<'a>, RleError> {
+    let mut file = RleHeader::default();
 
     let mut bytes = util_parse::take_ws_lines(bytes);
 
@@ -90,12 +91,10 @@ where
         bytes = rest;
     }
 
-    let (dx, dy) = file.offset.unwrap_or_default();
-
     let bytes = util_parse::take_ws_lines(bytes);
 
     // Parse encoding
-    read_encoding(bytes, dx, dy, f)?;
+    read_encoding(bytes, buf)?;
 
     Ok(file)
 }
@@ -269,18 +268,8 @@ pub enum RleEncodingError {
     UnrecognizedByte { got: u8 },
 }
 
-fn read_encoding<F>(
-    mut bytes: &[u8],
-    dx: WorldOffset,
-    dy: WorldOffset,
-    mut f: F,
-) -> Result<(), RleEncodingError>
-where
-    F: FnMut(WorldOffset, WorldOffset),
-{
-    let mut rep: u64 = 1;
-
-    let (mut x, mut y) = (0, 0);
+fn read_encoding(mut bytes: &[u8], buf: &mut dyn RleBufWrite) -> Result<(), RleEncodingError> {
+    let mut rep: u32 = 1;
 
     loop {
         let Some(b) = util_parse::peek_1(bytes) else {
@@ -294,14 +283,18 @@ where
             }
 
             // End of input
-            b'!' => break,
+            b'!' => {
+                buf.eof();
+
+                break;
+            }
 
             // Dead cell
             b'b' => {
                 let (_, rest) = util_parse::take_1(bytes);
                 bytes = rest;
 
-                x += rep as WorldOffset;
+                buf.dead_cell(rep);
 
                 rep = 1;
             }
@@ -311,11 +304,7 @@ where
                 let (_, rest) = util_parse::take_1(bytes);
                 bytes = rest;
 
-                for i in 0..rep {
-                    f(dx + x + i as WorldOffset, dy + y)
-                }
-
-                x += rep as WorldOffset;
+                buf.live_cell(rep);
 
                 rep = 1;
             }
@@ -325,8 +314,7 @@ where
                 let (_, rest) = util_parse::take_1(bytes);
                 bytes = rest;
 
-                y -= rep as WorldOffset;
-                x = 0;
+                buf.line_break(rep);
 
                 rep = 1;
             }
@@ -399,7 +387,7 @@ fn read_coordinates(bytes: &[u8]) -> Result<((WorldOffset, WorldOffset), &[u8]),
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     #[test]
     fn test_read_coordinates() {
         let bytes = b"x = 1, y = 1\n";
