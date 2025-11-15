@@ -37,7 +37,8 @@ pub fn read_rle<'a>(
     bytes: &'a [u8],
     buf: &'a mut dyn RleBufWrite,
 ) -> Result<RleHeader<'a>, RleError> {
-    let mut file = RleHeader::default();
+    let mut header = RleHeader::default();
+    let mut ruleset = None;
 
     let mut bytes = util_parse::take_ws_lines(bytes);
 
@@ -52,28 +53,28 @@ pub fn read_rle<'a>(
         match line {
             RleCommentLine::Comment => {}
             RleCommentLine::Name { name } => {
-                if file.name.is_some() {
+                if header.name.is_some() {
                     warn!("RLE file name already defined. Using latest");
                 }
 
-                file.name = Some(name);
+                header.name = Some(name);
             }
             RleCommentLine::Author { author } => {
-                if file.author.is_some() {
+                if header.author.is_some() {
                     warn!("RLE author already defined. Using latest");
                 }
 
-                file.author = Some(author);
+                header.author = Some(author);
             }
             RleCommentLine::Offset { x, y } => {
-                if file.offset.is_some() {
+                if header.offset.is_some() {
                     warn!("RLE offset already defined. Using latest");
                 }
 
-                file.offset = Some((x, y))
+                header.offset = Some((x, y))
             }
             RleCommentLine::RuleSet { set } => {
-                file.set = set;
+                ruleset = Some(set);
             }
         }
 
@@ -81,22 +82,37 @@ pub fn read_rle<'a>(
     }
 
     // Parse header line, if it's present
-    if let (Some(header), rest) = read_line_header(bytes)? {
-        let RleHeaderLine { x, y, .. } = header;
-        if file.offset.is_some() {
+    if let (Some(header_line), rest) = read_line_header(bytes)? {
+        let RleHeaderLine { x, y, set } = header_line;
+
+        if header.offset.is_some() {
             warn!("RLE offset already defined. Using latest");
         }
 
-        file.offset = Some((x, y));
+        header.offset = Some((x, y));
         bytes = rest;
+
+        match (&mut ruleset, &set) {
+            (_, None) => {}
+            (None, Some(..)) => {
+                ruleset = set;
+            }
+            (Some(..), Some(..)) => {
+                warn!("RLE ruleset already defined. Using header line ruleset");
+
+                ruleset = set;
+            }
+        }
     }
+
+    header.set = ruleset.unwrap_or_default();
 
     let bytes = util_parse::take_ws_lines(bytes);
 
     // Parse encoding
     read_encoding(bytes, buf)?;
 
-    Ok(file)
+    Ok(header)
 }
 
 enum RleCommentLine<'a> {
