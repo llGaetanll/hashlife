@@ -1,4 +1,4 @@
-use hashlife::parse_rle;
+use hashlife::rle_file;
 
 #[test]
 fn test_patterns() -> anyhow::Result<()> {
@@ -10,7 +10,7 @@ fn test_patterns() -> anyhow::Result<()> {
         let path = entry?.path();
         let bytes = std::fs::read(&path)?;
 
-        match parse_rle::read_rle(&bytes, |_x, _y| {}) {
+        match rle_file::read_rle(&bytes, |_x, _y| {}) {
             Ok(_) => tested += 1,
             Err(e) => failed.push((path.clone(), e)),
         }

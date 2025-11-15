@@ -2,12 +2,12 @@ use thiserror::Error;
 use tracing::warn;
 
 use crate::WorldOffset;
-use crate::parse_util::ParseError;
 use crate::rule_set;
 use crate::rule_set::RuleError;
 use crate::rule_set::RuleSet;
+use crate::util_parse::ParseError;
 
-use crate::parse_util;
+use crate::util_parse;
 
 #[derive(Default)]
 pub struct RleFile<'a> {
@@ -15,101 +15,6 @@ pub struct RleFile<'a> {
     pub author: Option<&'a [u8]>,
     pub offset: Option<(WorldOffset, WorldOffset)>,
     pub set: RuleSet,
-}
-
-/// A binary representation of an RLE file
-///
-/// # Representations
-/// All data is u32 aligned. Numbers are pushed as-is.
-/// * Live cell:  `0b01`
-/// * Dead cell:  `0b01`
-/// * Line break: `0b10`
-/// * Line break: `0b10`
-pub struct RleData {
-    data: Vec<u32>,
-}
-
-const DEAD_CELL_MAGIC: u32 = 0b00;
-const LIVE_CELL_MAGIC: u32 = 0b01;
-const LINE_BREAK_MAGIC: u32 = 0b10;
-const EOF_MAGIC: u32 = 0b11;
-
-impl RleData {
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            data: Vec::with_capacity(capacity),
-        }
-    }
-
-    /// Push `n` live cells to the data buffer
-    pub fn live_cell(&mut self, n: u32) {
-        debug_assert!(n > 1);
-
-        match self.data.last() {
-            Some(&LIVE_CELL_MAGIC) => self.update(LIVE_CELL_MAGIC, n),
-            Some(_) | None => {
-                self.data.push(n);
-                self.data.push(LIVE_CELL_MAGIC);
-            }
-        }
-    }
-
-    /// Push `n` dead cells to the data buffer
-    pub fn dead_cell(&mut self, n: u32) {
-        debug_assert!(n > 1);
-
-        match self.data.last() {
-            Some(&DEAD_CELL_MAGIC) => self.update(DEAD_CELL_MAGIC, n),
-            Some(_) | None => {
-                self.data.push(n);
-                self.data.push(DEAD_CELL_MAGIC);
-            }
-        }
-    }
-
-    /// Push `n` line breaks to the data buffer
-    pub fn line_break(&mut self, n: u32) {
-        debug_assert!(n > 1);
-
-        match self.data.last() {
-            Some(&LINE_BREAK_MAGIC) => self.update(LINE_BREAK_MAGIC, n),
-            Some(_) | None => {
-                self.data.push(n);
-                self.data.push(LINE_BREAK_MAGIC);
-            }
-        }
-    }
-
-    /// Push an EOF marker to the data buffer
-    pub fn eof(&mut self) {
-        if let Some(&EOF_MAGIC) = self.data.last() {
-            return;
-        }
-
-        self.data.push(EOF_MAGIC)
-    }
-
-    fn update(&mut self, mask: u32, n: u32) {
-        let len = self.data.len();
-        if len < 2 {
-            debug_assert_eq!(len, 1, "Update is only called when buffer is not empty");
-
-            self.data[0] = n;
-            self.data.push(mask);
-        } else if Self::is_mask(self.data[len - 2]) {
-            self.data[len - 1] = n;
-            self.data.push(mask);
-        } else {
-            self.data[len - 2] += n; // NOTE: Possible overflow
-        }
-    }
-
-    fn is_mask(entry: u32) -> bool {
-        matches!(
-            entry,
-            LIVE_CELL_MAGIC | DEAD_CELL_MAGIC | LINE_BREAK_MAGIC | EOF_MAGIC
-        )
-    }
 }
 
 #[derive(Debug, Error)]
@@ -133,7 +38,7 @@ where
 {
     let mut file = RleFile::default();
 
-    let mut bytes = parse_util::take_ws_lines(bytes);
+    let mut bytes = util_parse::take_ws_lines(bytes);
 
     // Parse as many comment lines as possible
     loop {
@@ -141,7 +46,7 @@ where
             break;
         };
 
-        let rest = parse_util::take_ws_lines(rest);
+        let rest = util_parse::take_ws_lines(rest);
 
         match line {
             RleCommentLine::Comment => {}
@@ -187,7 +92,7 @@ where
 
     let (dx, dy) = file.offset.unwrap_or_default();
 
-    let bytes = parse_util::take_ws_lines(bytes);
+    let bytes = util_parse::take_ws_lines(bytes);
 
     // Parse encoding
     read_encoding(bytes, dx, dy, f)?;
@@ -228,26 +133,26 @@ pub enum RleCommentLineError {
 fn read_line_comment(
     bytes: &'_ [u8],
 ) -> Result<(Option<RleCommentLine<'_>>, &'_ [u8]), RleCommentLineError> {
-    let Ok(bytes) = parse_util::expect(b'#', bytes) else {
+    let Ok(bytes) = util_parse::expect(b'#', bytes) else {
         return Ok((None, bytes));
     };
 
-    let (Some(b), bytes) = parse_util::take_1(bytes) else {
+    let (Some(b), bytes) = util_parse::take_1(bytes) else {
         return Err(RleCommentLineError::NoType);
     };
 
     match b {
         // Comment line
         b'C' | b'c' => {
-            let (_, bytes) = parse_util::take_with(b'\n', bytes);
+            let (_, bytes) = util_parse::take_with(b'\n', bytes);
 
             Ok((Some(RleCommentLine::Comment), bytes))
         }
 
         // Pattern name
         b'N' => {
-            let bytes = parse_util::take_ws(bytes);
-            let (Some(name), bytes) = parse_util::take_with(b'\n', bytes) else {
+            let bytes = util_parse::take_ws(bytes);
+            let (Some(name), bytes) = util_parse::take_with(b'\n', bytes) else {
                 return Err(RleCommentLineError::EmptyName);
             };
 
@@ -258,8 +163,8 @@ fn read_line_comment(
 
         // Pattern author
         b'O' => {
-            let bytes = parse_util::take_ws(bytes);
-            let (Some(author), bytes) = parse_util::take_with(b'\n', bytes) else {
+            let bytes = util_parse::take_ws(bytes);
+            let (Some(author), bytes) = util_parse::take_with(b'\n', bytes) else {
                 return Err(RleCommentLineError::EmptyAuthor);
             };
 
@@ -270,7 +175,7 @@ fn read_line_comment(
 
         // Pattern offset
         b'R' | b'P' => {
-            let bytes = parse_util::take_ws(bytes);
+            let bytes = util_parse::take_ws(bytes);
             let ((x, y), bytes) = read_coordinates(bytes)?;
 
             let line = RleCommentLine::Offset { x, y };
@@ -280,9 +185,9 @@ fn read_line_comment(
 
         // Pattern rules
         b'r' => {
-            let bytes = parse_util::take_ws(bytes);
+            let bytes = util_parse::take_ws(bytes);
             let (rule, bytes) = rule_set::parse_nameless_rule(bytes)?;
-            let bytes = parse_util::take_ws(bytes);
+            let bytes = util_parse::take_ws(bytes);
 
             let line = RleCommentLine::RuleSet { set: rule };
 
@@ -317,17 +222,17 @@ fn read_line_header(bytes: &[u8]) -> Result<(Option<RleHeaderLine>, &[u8]), RleH
         return Ok((None, bytes));
     };
 
-    let (Some(b), bytes) = parse_util::take_1(bytes) else {
+    let (Some(b), bytes) = util_parse::take_1(bytes) else {
         unreachable!("read_coordinates internally takes until, so we haven't reached EOF")
     };
 
     match b {
         b',' => {
-            let bytes = parse_util::take_ws(bytes);
-            let bytes = parse_util::expect_slice("rule".as_bytes(), bytes)?;
-            let bytes = parse_util::take_ws(bytes);
-            let bytes = parse_util::expect(b'=', bytes)?;
-            let bytes = parse_util::take_ws(bytes);
+            let bytes = util_parse::take_ws(bytes);
+            let bytes = util_parse::expect_slice("rule".as_bytes(), bytes)?;
+            let bytes = util_parse::take_ws(bytes);
+            let bytes = util_parse::expect(b'=', bytes)?;
+            let bytes = util_parse::take_ws(bytes);
 
             let (rule, bytes) = match rule_set::parse_rule(bytes) {
                 Ok((rule, bytes)) => (rule, bytes),
@@ -358,7 +263,7 @@ pub enum RleEncodingError {
     UnexpectedEof,
 
     #[error("Failed to convert run length: {0}")]
-    RunLength(#[from] parse_util::ConvertError),
+    RunLength(#[from] util_parse::ConvertError),
 
     #[error("Unrecognized byte: 0x{got:0X}")]
     UnrecognizedByte { got: u8 },
@@ -378,13 +283,13 @@ where
     let (mut x, mut y) = (0, 0);
 
     loop {
-        let Some(b) = parse_util::peek_1(bytes) else {
+        let Some(b) = util_parse::peek_1(bytes) else {
             return Err(RleEncodingError::UnexpectedEof);
         };
 
         match b {
             b'\r' | b'\n' | b' ' => {
-                let (_, rest) = parse_util::take_1(bytes);
+                let (_, rest) = util_parse::take_1(bytes);
                 bytes = rest;
             }
 
@@ -393,7 +298,7 @@ where
 
             // Dead cell
             b'b' => {
-                let (_, rest) = parse_util::take_1(bytes);
+                let (_, rest) = util_parse::take_1(bytes);
                 bytes = rest;
 
                 x += rep as WorldOffset;
@@ -403,7 +308,7 @@ where
 
             // Live cell
             b'o' | b'x' | b'y' | b'z' => {
-                let (_, rest) = parse_util::take_1(bytes);
+                let (_, rest) = util_parse::take_1(bytes);
                 bytes = rest;
 
                 for i in 0..rep {
@@ -417,7 +322,7 @@ where
 
             // End of line
             b'$' => {
-                let (_, rest) = parse_util::take_1(bytes);
+                let (_, rest) = util_parse::take_1(bytes);
                 bytes = rest;
 
                 y -= rep as WorldOffset;
@@ -428,17 +333,17 @@ where
 
             // NOTE: All numbers are > 1
             n if n.is_ascii_digit() => {
-                let (Some(n), rest) = parse_util::take_until_fn(|b| !b.is_ascii_digit(), bytes)
+                let (Some(n), rest) = util_parse::take_until_fn(|b| !b.is_ascii_digit(), bytes)
                 else {
                     unreachable!("We peeked and found a digit")
                 };
                 bytes = rest;
 
-                if let Some(b'\n') = parse_util::peek_1(bytes) {
+                if let Some(b'\n') = util_parse::peek_1(bytes) {
                     unreachable!("Repeat count cannot be cut off by a new line")
                 };
 
-                rep = parse_util::convert(n).map_err(RleEncodingError::RunLength)?;
+                rep = util_parse::convert(n).map_err(RleEncodingError::RunLength)?;
             }
 
             b => return Err(RleEncodingError::UnrecognizedByte { got: b }),
@@ -457,38 +362,38 @@ pub enum RleCoordError {
     NoX,
 
     #[error("Failed to parse x coordinate: {0}")]
-    ParseX(#[source] parse_util::ConvertError),
+    ParseX(#[source] util_parse::ConvertError),
 
     #[error("Expected y coordinate, found end of input")]
     NoY,
 
     #[error("Failed to parse y coordinate: {0}")]
-    ParseY(#[source] parse_util::ConvertError),
+    ParseY(#[source] util_parse::ConvertError),
 }
 
 fn read_coordinates(bytes: &[u8]) -> Result<((WorldOffset, WorldOffset), &[u8]), RleCoordError> {
-    let bytes = parse_util::expect(b'x', bytes)?;
-    let bytes = parse_util::take_ws(bytes);
-    let bytes = parse_util::expect(b'=', bytes)?;
-    let bytes = parse_util::take_ws(bytes);
+    let bytes = util_parse::expect(b'x', bytes)?;
+    let bytes = util_parse::take_ws(bytes);
+    let bytes = util_parse::expect(b'=', bytes)?;
+    let bytes = util_parse::take_ws(bytes);
 
-    let (Some(x_bytes), bytes) = parse_util::take_with(b',', bytes) else {
+    let (Some(x_bytes), bytes) = util_parse::take_with(b',', bytes) else {
         return Err(RleCoordError::NoX);
     };
-    let x: WorldOffset = parse_util::convert(x_bytes).map_err(RleCoordError::ParseX)?;
+    let x: WorldOffset = util_parse::convert(x_bytes).map_err(RleCoordError::ParseX)?;
 
-    let bytes = parse_util::take_ws(bytes);
-    let bytes = parse_util::expect(b'y', bytes)?;
-    let bytes = parse_util::take_ws(bytes);
-    let bytes = parse_util::expect(b'=', bytes)?;
-    let bytes = parse_util::take_ws(bytes);
+    let bytes = util_parse::take_ws(bytes);
+    let bytes = util_parse::expect(b'y', bytes)?;
+    let bytes = util_parse::take_ws(bytes);
+    let bytes = util_parse::expect(b'=', bytes)?;
+    let bytes = util_parse::take_ws(bytes);
 
     // Coordinates can be terminated with either `,` or `\n`.
     let p = |b| b == b',' || b == b'\n';
-    let (Some(y_bytes), bytes) = parse_util::take_until_fn(p, bytes) else {
+    let (Some(y_bytes), bytes) = util_parse::take_until_fn(p, bytes) else {
         return Err(RleCoordError::NoY);
     };
-    let y: WorldOffset = parse_util::convert(y_bytes).map_err(RleCoordError::ParseY)?;
+    let y: WorldOffset = util_parse::convert(y_bytes).map_err(RleCoordError::ParseY)?;
 
     Ok(((x, y), bytes))
 }

@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::parse_util;
+use crate::util_parse;
 
 const NBHD_MASK: u16 = 0b0000_0111_0101_0111;
 const CELL_MASK: u16 = 0b0000_0000_0010_0000;
@@ -170,7 +170,7 @@ impl RuleSet {
 #[derive(Debug, Error)]
 pub enum RuleError {
     #[error("Parse error: {0}")]
-    ParseError(#[from] parse_util::ParseError),
+    ParseError(#[from] util_parse::ParseError),
 
     #[error("Header rule must contain b or B")]
     NoBirths,
@@ -204,27 +204,27 @@ fn survival_stop_fn(b: u8) -> bool {
 
 // Parse rules that look like b3/s23
 pub(crate) fn parse_rule(bytes: &[u8]) -> Result<(RuleSet, &[u8]), RuleError> {
-    let (Some(b'b' | b'B'), bytes) = parse_util::take_1(bytes) else {
+    let (Some(b'b' | b'B'), bytes) = util_parse::take_1(bytes) else {
         return Err(RuleError::NoBirths);
     };
 
-    let (Some(b), bytes) = parse_util::take_until(b'/', bytes) else {
+    let (Some(b), bytes) = util_parse::take_until(b'/', bytes) else {
         return Err(RuleError::NoBirthsCount);
     };
     let b = bytes_to_num(b).map_err(|_| RuleError::BirthCountContainsNonDigits)?;
 
-    let bytes = parse_util::expect(b'/', bytes)?;
+    let bytes = util_parse::expect(b'/', bytes)?;
 
-    let (Some(b's' | b'S'), bytes) = parse_util::take_1(bytes) else {
+    let (Some(b's' | b'S'), bytes) = util_parse::take_1(bytes) else {
         return Err(RuleError::NoSurvivals);
     };
 
-    let (Some(s), bytes) = parse_util::take_until_fn(survival_stop_fn, bytes) else {
+    let (Some(s), bytes) = util_parse::take_until_fn(survival_stop_fn, bytes) else {
         return Err(RuleError::NoSurvivalsCount);
     };
     let s = bytes_to_num(s).map_err(|_| RuleError::SurvivalCountContainsNonDigits)?;
 
-    let (rule, bytes) = if let Some(b':') = parse_util::peek_1(bytes) {
+    let (rule, bytes) = if let Some(b':') = util_parse::peek_1(bytes) {
         let (ext, bytes) = parse_rule_extension(bytes)?;
 
         (RuleSet::with_extension(b, s, ext), bytes)
@@ -237,19 +237,19 @@ pub(crate) fn parse_rule(bytes: &[u8]) -> Result<(RuleSet, &[u8]), RuleError> {
 
 // Parse rules that look like 3/23. These show up in RLE #r comment lines.
 pub(crate) fn parse_nameless_rule(bytes: &[u8]) -> Result<(RuleSet, &[u8]), RuleError> {
-    let (Some(b), bytes) = parse_util::take_until(b'/', bytes) else {
+    let (Some(b), bytes) = util_parse::take_until(b'/', bytes) else {
         return Err(RuleError::NoBirthsCount);
     };
     let b = bytes_to_num(b).map_err(|_| RuleError::BirthCountContainsNonDigits)?;
 
-    let bytes = parse_util::expect(b'/', bytes)?;
+    let bytes = util_parse::expect(b'/', bytes)?;
 
-    let (Some(s), bytes) = parse_util::take_until_fn(survival_stop_fn, bytes) else {
+    let (Some(s), bytes) = util_parse::take_until_fn(survival_stop_fn, bytes) else {
         return Err(RuleError::NoSurvivalsCount);
     };
     let s = bytes_to_num(s).map_err(|_| RuleError::SurvivalCountContainsNonDigits)?;
 
-    let (rule, bytes) = if let Some(b':') = parse_util::peek_1(bytes) {
+    let (rule, bytes) = if let Some(b':') = util_parse::peek_1(bytes) {
         let (ext, bytes) = parse_rule_extension(bytes)?;
 
         (RuleSet::with_extension(b, s, ext), bytes)
@@ -280,7 +280,7 @@ pub struct RuleExtension {
 #[derive(Debug, Error)]
 pub enum RuleExtensionError {
     #[error("Parse error")]
-    ParseError(#[from] parse_util::ParseError),
+    ParseError(#[from] util_parse::ParseError),
 
     #[error("Unexpected EOF")]
     UnexpectedEof,
@@ -304,15 +304,15 @@ pub enum RuleExtensionError {
     ParseHeight { got: String },
 
     #[error("Failed to parse generation: {0}")]
-    ParseGeneration(#[from] parse_util::ConvertError),
+    ParseGeneration(#[from] util_parse::ConvertError),
 }
 
 pub(crate) fn parse_rule_extension(
     bytes: &[u8],
 ) -> Result<(RuleExtension, &[u8]), RuleExtensionError> {
-    let bytes = parse_util::expect(b':', bytes)?;
+    let bytes = util_parse::expect(b':', bytes)?;
 
-    let (Some(b), bytes) = parse_util::take_1(bytes) else {
+    let (Some(b), bytes) = util_parse::take_1(bytes) else {
         return Err(RuleExtensionError::UnexpectedEof);
     };
 
@@ -339,17 +339,17 @@ pub(crate) fn parse_rule_extension(
 
     match topology {
         RuleTopology::Planar | RuleTopology::Torus | RuleTopology::Cylindrical => {
-            let (Some(width_bs), bytes) = parse_util::take_until(b',', bytes) else {
+            let (Some(width_bs), bytes) = util_parse::take_until(b',', bytes) else {
                 return Err(RuleExtensionError::NoWidth);
             };
-            let width = parse_util::convert(width_bs)?;
+            let width = util_parse::convert(width_bs)?;
 
-            let bytes = parse_util::expect(b',', bytes)?;
+            let bytes = util_parse::expect(b',', bytes)?;
 
-            let (Some(height_bs), bytes) = parse_util::take_until_fn(height_take_fn, bytes) else {
+            let (Some(height_bs), bytes) = util_parse::take_until_fn(height_take_fn, bytes) else {
                 return Err(RuleExtensionError::NoHeight);
             };
-            let height = parse_util::convert(height_bs)?;
+            let height = util_parse::convert(height_bs)?;
 
             let (generation, bytes) = parse_rule_extension_generation(bytes)?;
 
@@ -363,11 +363,11 @@ pub(crate) fn parse_rule_extension(
             Ok((extension, bytes))
         }
         RuleTopology::Spherical => {
-            let (Some(size_bs), bytes) = parse_util::take_until_fn(height_take_fn, bytes) else {
+            let (Some(size_bs), bytes) = util_parse::take_until_fn(height_take_fn, bytes) else {
                 return Err(RuleExtensionError::NoHeight);
             };
 
-            let size = parse_util::convert(size_bs)?;
+            let size = util_parse::convert(size_bs)?;
 
             let (generation, bytes) = parse_rule_extension_generation(bytes)?;
 
@@ -382,14 +382,14 @@ pub(crate) fn parse_rule_extension(
         }
         RuleTopology::KleinBottle => {
             let width_take_fn = |b: u8| -> bool { b == b',' || b == b'*' };
-            let (Some(width_bs), bytes) = parse_util::take_until_fn(width_take_fn, bytes) else {
+            let (Some(width_bs), bytes) = util_parse::take_until_fn(width_take_fn, bytes) else {
                 return Err(RuleExtensionError::NoWidth);
             };
-            let width = parse_util::convert(width_bs)?;
+            let width = util_parse::convert(width_bs)?;
 
             // TODO: We parse which axis is flipped but don't keep track of it
-            let (_flip, bytes) = if let Some(b'*') = parse_util::peek_1(bytes) {
-                let Ok(bytes) = parse_util::expect(b'*', bytes) else {
+            let (_flip, bytes) = if let Some(b'*') = util_parse::peek_1(bytes) {
+                let Ok(bytes) = util_parse::expect(b'*', bytes) else {
                     unreachable!("We peeked and saw b'*'")
                 };
 
@@ -398,18 +398,18 @@ pub(crate) fn parse_rule_extension(
                 (false, bytes)
             };
 
-            let bytes = parse_util::expect(b',', bytes)?;
+            let bytes = util_parse::expect(b',', bytes)?;
 
             let height_take_fn =
                 |b: u8| -> bool { b == b'*' || b == b'+' || b.is_ascii_whitespace() };
-            let (Some(height_bs), bytes) = parse_util::take_until_fn(height_take_fn, bytes) else {
+            let (Some(height_bs), bytes) = util_parse::take_until_fn(height_take_fn, bytes) else {
                 return Err(RuleExtensionError::NoWidth);
             };
-            let height = parse_util::convert(height_bs)?;
+            let height = util_parse::convert(height_bs)?;
 
             // TODO: We parse which axis is flipped but don't keep track of it
-            let (_flip, bytes) = if let Some(b'*') = parse_util::peek_1(bytes) {
-                let Ok(bytes) = parse_util::expect(b'*', bytes) else {
+            let (_flip, bytes) = if let Some(b'*') = util_parse::peek_1(bytes) {
+                let Ok(bytes) = util_parse::expect(b'*', bytes) else {
                     unreachable!("We peeked and saw b'*'")
                 };
 
@@ -433,16 +433,16 @@ pub(crate) fn parse_rule_extension(
 }
 
 fn parse_rule_extension_generation(bytes: &[u8]) -> Result<(u64, &[u8]), RuleExtensionError> {
-    if let Some(b'+') = parse_util::peek_1(bytes) {
-        let Ok(bytes) = parse_util::expect(b'+', bytes) else {
+    if let Some(b'+') = util_parse::peek_1(bytes) {
+        let Ok(bytes) = util_parse::expect(b'+', bytes) else {
             unreachable!("We peeked and saw b'+'")
         };
 
-        let (Some(gen_bs), bytes) = parse_util::take_until_ws(bytes) else {
+        let (Some(gen_bs), bytes) = util_parse::take_until_ws(bytes) else {
             return Err(RuleExtensionError::NoGeneration);
         };
 
-        let generation = parse_util::convert(gen_bs)?;
+        let generation = util_parse::convert(gen_bs)?;
 
         Ok((generation, bytes))
     } else {

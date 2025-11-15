@@ -2,7 +2,7 @@ use std::fs::read_to_string;
 use std::path::Path;
 
 use hashlife::camera::Camera;
-use hashlife::parse_rle::read_rle;
+use hashlife::rle_file::read_rle;
 use hashlife::rule_set::B3S23;
 use hashlife::world::World;
 
