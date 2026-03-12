@@ -285,7 +285,7 @@ pub enum RleEncodingError {
 }
 
 fn read_encoding(mut bytes: &[u8], buf: &mut dyn RleBufWrite) -> Result<(), RleEncodingError> {
-    let mut rep: u32 = 1;
+    let mut rep: u64 = 1;
 
     loop {
         let Some(b) = util_parse::peek_1(bytes) else {
