@@ -2,6 +2,7 @@ use crate::rule_set::RuleSet;
 
 use crate::cell::Cell;
 use crate::WorldOffset;
+use crate::cell::Cell;
 
 pub struct World {
     /// Life rules
@@ -128,34 +129,18 @@ impl World {
     #[allow(clippy::collapsible_else_if)]
     fn get_quadrant(cell: Cell, x: i128, y: i128) -> usize {
         if x < 0 {
-            if y < 0 {
-                cell.sw
-            } else {
-                cell.nw
-            }
+            if y < 0 { cell.sw } else { cell.nw }
         } else {
-            if y < 0 {
-                cell.se
-            } else {
-                cell.ne
-            }
+            if y < 0 { cell.se } else { cell.ne }
         }
     }
 
     #[allow(clippy::collapsible_else_if)]
     fn get_quadrant_mut(cell: &mut Cell, x: i128, y: i128) -> &mut usize {
         if x < 0 {
-            if y < 0 {
-                &mut cell.sw
-            } else {
-                &mut cell.nw
-            }
+            if y < 0 { &mut cell.sw } else { &mut cell.nw }
         } else {
-            if y < 0 {
-                &mut cell.se
-            } else {
-                &mut cell.ne
-            }
+            if y < 0 { &mut cell.se } else { &mut cell.ne }
         }
     }
 
