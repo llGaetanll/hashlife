@@ -1,6 +1,5 @@
 use crate::rle_data::RleBuffer;
 use crate::rle_data::RleBufferEntry;
-use crate::rle_file::RleHeader;
 use crate::rule_set::RuleSet;
 
 use crate::WorldOffset;
@@ -42,8 +41,8 @@ impl World {
         }
     }
 
-    pub fn from_rle(header: RleHeader, data: RleBuffer) -> Self {
-        let mut world = Self::new(header.set);
+    pub fn from_rle(set: RuleSet, data: RleBuffer) -> Self {
+        let mut world = Self::new(set);
 
         let mut x: WorldOffset = 0;
         let mut y: WorldOffset = 0;

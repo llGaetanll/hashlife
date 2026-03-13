@@ -1,3 +1,4 @@
+use std::env;
 use std::error::Error;
 use std::io;
 use std::thread;
@@ -15,8 +16,8 @@ use crossterm::execute;
 use crossterm::style;
 use crossterm::terminal;
 use hashlife::camera::Camera;
-use hashlife::cell::Cell;
-use hashlife::rule_set::B3S23;
+use hashlife::rle_data::RleBuffer;
+use hashlife::rle_file;
 use hashlife::world::World;
 
 const FRAMERATE: u32 = 120;
@@ -36,32 +37,11 @@ enum Event {
     Exit,
 }
 
-const DUMMY_LEAF: Cell = Cell::leaf(
-    0b0010_0001_0111_0000,
-    0b0000_0100_0101_0110,
-    0b0110_1010_0010_0000,
-    0b0000_1110_1000_0100,
-);
-
-fn setup_world(depth: u8) -> World {
-    let mut world = World::new(B3S23);
-
-    world.buf.pop();
-    world.buf.push(DUMMY_LEAF);
-
-    let n = world.buf.len();
-
-    for i in 0..depth {
-        let i = n + i as usize - 1;
-        world.buf.push(Cell::new(i, i, i, i));
-    }
-
-    world.root = world.buf.len() - 1;
-    world.depth = depth + 3;
-
-    world.grow(1);
-
-    world
+fn load_rle(path: &str) -> Result<World, Box<dyn Error>> {
+    let bytes = std::fs::read(path)?;
+    let mut buf = RleBuffer::new();
+    let header = rle_file::read_rle(&bytes, &mut buf)?;
+    Ok(World::from_rle(header.set, buf))
 }
 
 /// Returns true if app should exit
@@ -125,8 +105,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Get the width and height of the terminal
     let (cols, rows) = terminal::size()?;
 
+    let path = env::args().nth(1).unwrap_or_else(|| {
+        terminal::disable_raw_mode().ok();
+        eprintln!("Usage: ui <path-to-rle-file>");
+        std::process::exit(1);
+    });
+
     let mut cam = Camera::new(cols, rows);
-    let mut world = setup_world(2);
+    let mut world = load_rle(&path)?;
 
     loop {
         let t = time::SystemTime::now();
