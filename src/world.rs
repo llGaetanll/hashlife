@@ -1,4 +1,5 @@
 use crate::rle_data::RleBuffer;
+use crate::rle_data::RleBufferEntry;
 use crate::rle_file::RleHeader;
 use crate::rule_set::RuleSet;
 
@@ -42,9 +43,42 @@ impl World {
     }
 
     pub fn from_rle(header: RleHeader, data: RleBuffer) -> Self {
-        let world = Self::new(header.set);
+        let mut world = Self::new(header.set);
 
-        todo!()
+        let mut x: WorldOffset = 0;
+        let mut y: WorldOffset = 0;
+
+        for entry in data.iter() {
+            match entry {
+                RleBufferEntry::DeadCell(n) => {
+                    x += n as WorldOffset;
+                }
+                RleBufferEntry::LiveCell(n) => {
+                    for _ in 0..n {
+                        world.ensure_fits(x, y);
+                        world.set(x, y);
+                        x += 1;
+                    }
+                }
+                RleBufferEntry::LineBreak(n) => {
+                    x = 0;
+                    y += n as WorldOffset;
+                }
+            }
+        }
+
+        world
+    }
+
+    /// Grow the world until `(x, y)` is within bounds
+    fn ensure_fits(&mut self, x: WorldOffset, y: WorldOffset) {
+        loop {
+            let w = 1 << (self.depth - 1);
+            if -w <= x && x < w && -w <= y && y < w {
+                break;
+            }
+            self.grow(1);
+        }
     }
 
     pub fn next(&mut self) {
