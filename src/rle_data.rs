@@ -24,10 +24,9 @@ pub struct RleBuffer {
 }
 
 pub enum RleBufferEntry {
-    RunLength(u64),
-    LiveCell,
-    DeadCell,
-    LineBreak,
+    LiveCell(u64),
+    DeadCell(u64),
+    LineBreak(u64),
 }
 
 const NUMER_MASK: u8 = 0x7F;
@@ -127,6 +126,52 @@ impl Default for RleBuffer {
     }
 }
 
+pub struct RleBufferIter<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl RleBuffer {
+    pub fn iter(&self) -> RleBufferIter<'_> {
+        RleBufferIter {
+            data: &self.data,
+            pos: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for RleBufferIter<'a> {
+    type Item = RleBufferEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut n: u64 = 0;
+        let mut has_number = false;
+
+        loop {
+            let &byte = self.data.get(self.pos)?;
+            self.pos += 1;
+
+            if byte & MAGIC_MASK == 0 {
+                // Number byte: accumulate 7 bits
+                n = (n << 7) | (byte & NUMER_MASK) as u64;
+                has_number = true;
+            } else {
+                // Magic byte
+                let run = if has_number { n } else { 1 };
+                let magic = byte & !MAGIC_MASK;
+
+                return match magic {
+                    DEAD_CELL_MAGIC => Some(RleBufferEntry::DeadCell(run)),
+                    LIVE_CELL_MAGIC => Some(RleBufferEntry::LiveCell(run)),
+                    LINE_BREAK_MAGIC => Some(RleBufferEntry::LineBreak(run)),
+                    EOF_MAGIC => None,
+                    _ => unreachable!("invalid magic: 0x{:02X}", magic),
+                };
+            }
+        }
+    }
+}
+
 /// A type that implements `RleBuf` where every operation is a noop. Useful for parsing tests
 pub struct RleSink;
 
@@ -141,7 +186,7 @@ impl RleBufWrite for RleSink {
 }
 
 #[cfg(test)]
-mod tests {
+mod test_serialize {
     use crate::rle_data::DEAD_CELL_MAGIC;
     use crate::rle_data::EOF_MAGIC;
     use crate::rle_data::LINE_BREAK_MAGIC;
@@ -303,5 +348,82 @@ mod tests {
             &buf.data,
             &[5, LINE_BREAK_MAGIC | MAGIC_MASK, EOF_MAGIC | MAGIC_MASK]
         );
+    }
+}
+
+#[cfg(test)]
+mod test_deserialize {
+    use crate::rle_data::RleBufWrite;
+    use crate::rle_data::RleBuffer;
+    use crate::rle_data::RleBufferEntry;
+
+    #[test]
+    fn test_iter_single_live_cell() {
+        let mut buf = RleBuffer::new();
+        buf.live_cell(1);
+        buf.eof();
+
+        let entries: Vec<_> = buf.iter().collect();
+        assert_eq!(entries.len(), 1);
+        assert!(matches!(entries[0], RleBufferEntry::LiveCell(1)));
+    }
+
+    #[test]
+    fn test_iter_run_length() {
+        let mut buf = RleBuffer::new();
+        buf.dead_cell(42);
+        buf.eof();
+
+        let entries: Vec<_> = buf.iter().collect();
+        assert_eq!(entries.len(), 1);
+        assert!(matches!(entries[0], RleBufferEntry::DeadCell(42)));
+    }
+
+    #[test]
+    fn test_iter_run_length_128() {
+        let mut buf = RleBuffer::new();
+        buf.live_cell(128);
+        buf.eof();
+
+        let entries: Vec<_> = buf.iter().collect();
+        assert_eq!(entries.len(), 1);
+        assert!(matches!(entries[0], RleBufferEntry::LiveCell(128)));
+    }
+
+    #[test]
+    fn test_iter_mixed_sequence() {
+        let mut buf = RleBuffer::new();
+        buf.dead_cell(3);
+        buf.live_cell(5);
+        buf.line_break(1);
+        buf.live_cell(2);
+        buf.eof();
+
+        let entries: Vec<_> = buf.iter().collect();
+        assert_eq!(entries.len(), 4);
+        assert!(matches!(entries[0], RleBufferEntry::DeadCell(3)));
+        assert!(matches!(entries[1], RleBufferEntry::LiveCell(5)));
+        assert!(matches!(entries[2], RleBufferEntry::LineBreak(1)));
+        assert!(matches!(entries[3], RleBufferEntry::LiveCell(2)));
+    }
+
+    #[test]
+    fn test_iter_empty() {
+        let mut buf = RleBuffer::new();
+        buf.eof();
+
+        let entries: Vec<_> = buf.iter().collect();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_iter_large_run_length() {
+        let mut buf = RleBuffer::new();
+        buf.live_cell(16384);
+        buf.eof();
+
+        let entries: Vec<_> = buf.iter().collect();
+        assert_eq!(entries.len(), 1);
+        assert!(matches!(entries[0], RleBufferEntry::LiveCell(16384)));
     }
 }
