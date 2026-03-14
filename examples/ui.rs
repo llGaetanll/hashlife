@@ -15,7 +15,7 @@ use crossterm::event::KeyModifiers;
 use crossterm::execute;
 use crossterm::style;
 use crossterm::terminal;
-use hashlife::camera::Camera;
+use hashlife::camera::CameraBraille;
 use hashlife::rle_data::RleBuffer;
 use hashlife::rle_file;
 use hashlife::world::World;
@@ -111,7 +111,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         std::process::exit(1);
     });
 
-    let mut cam = Camera::new(cols, rows);
+    let mut cam = CameraBraille::new(cols, rows);
     let mut world = load_rle(&path)?;
 
     loop {

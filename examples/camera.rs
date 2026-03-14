@@ -1,4 +1,4 @@
-use hashlife::camera::Camera;
+use hashlife::camera::CameraBraille;
 use hashlife::cell::Cell;
 use hashlife::rule_set::B3S23;
 use hashlife::world::World;
@@ -30,7 +30,7 @@ fn setup_world(depth: u8) -> World {
 }
 
 fn main() {
-    let mut cam = Camera::new(10, 10);
+    let mut cam = CameraBraille::new(10, 10);
     let world = setup_world(6);
 
     cam.draw(&world);

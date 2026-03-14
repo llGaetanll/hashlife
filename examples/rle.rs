@@ -1,7 +1,7 @@
 use std::fs::read_to_string;
 use std::path::Path;
 
-use hashlife::camera::Camera;
+use hashlife::camera::CameraBraille;
 use hashlife::rle_data::RleBuffer;
 use hashlife::rle_file;
 use hashlife::rule_set::B3S23;
@@ -14,7 +14,7 @@ fn main() {
 
     let data = data.as_bytes();
 
-    let mut cam = Camera::new(100, 100);
+    let mut cam = CameraBraille::new(100, 100);
     let mut world = World::new(B3S23);
     world.grow(5);
 
