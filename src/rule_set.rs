@@ -466,7 +466,7 @@ fn bytes_to_num(bytes: &[u8]) -> Result<u16, ()> {
 }
 
 #[cfg(test)]
-mod tests {
+mod test_parse {
     use crate::rule_set::RuleError;
 
     #[test]
@@ -543,5 +543,47 @@ mod tests {
         assert_eq!(bs, b" ");
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test_next {
+    #[test]
+    fn test_still_life() {
+        let rule = super::B3S23;
+
+        // A 2x2 block in the center of a 4x4 grid (still life under B3/S23)
+        // The result is the inner 2x2 should stay the same
+        let cell: u16 = 0b0000_0110_0110_0000;
+        let res = rule.next(cell);
+
+        assert_eq!(res, cell, "\nExpected: {cell:016b}\n     Got: {res:016b}");
+    }
+
+    #[test]
+    fn test_blinker() {
+        let rule = super::B3S23;
+
+        // Horizontal blinker across row 1
+        let cell: u16 = 0b0000_0111_0000_0000;
+        let exp: u16 = 0b0000_0010_0010_0000;
+        let res = rule.next(cell);
+
+        assert_eq!(res, exp, "\nExpected: {exp:016b}\n     Got: {res:016b}");
+    }
+
+    #[test]
+    fn test_t_shape() {
+        let rule = super::B3S23;
+
+        // T-shape
+        let cell: u16 = 0b0000_1110_0100_0000;
+        let expected: u16 = 0b0000_0110_0110_0000;
+        let res = rule.next(cell);
+
+        assert_eq!(
+            res, expected,
+            "\nExpected: {expected:016b}\n     Got: {res:016b}"
+        );
     }
 }
