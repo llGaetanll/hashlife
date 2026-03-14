@@ -1,8 +1,8 @@
 use tracing::debug;
 use tracing::trace;
 
-use crate::camera::Camera;
 use crate::CellOffset;
+use crate::camera::Camera;
 
 /// On 64 bit machines: 1 followed by 63 0s, `9_223_372_036_854_775_808`.
 /// On 32 bit machines: 1 followed by 31 0s, `2_147_483_648`.
@@ -719,4 +719,79 @@ fn debug_draw(cell: Cell, cells: &[Cell], depth: u8) {
     //
     //     debug!("\n{s}");
     // }
+}
+
+#[cfg(test)]
+mod test_next {
+    use crate::cell::Cell;
+    use crate::rule_set::B3S23;
+
+    #[test]
+    fn test_glider_leaf() {
+        let rules = B3S23.compute_rules();
+
+        // Glider in top-left of 8x8 leaf:
+        // . . . . | . . . .
+        // . . # . | . . . .
+        // . . . # | . . . .
+        // . # # # | . . . .
+        // --------|--------
+        // . . . . | . . . .
+        // . . . . | . . . .
+        // . . . . | . . . .
+        // . . . . | . . . .
+        let nw: u16 = 0b0000_0010_0001_0111;
+        let mut leaf = Cell::leaf(nw, 0, 0, 0);
+
+        let result = leaf.compute_leaf_res(&rules);
+
+        // After 1 step, center 4x4 (rows 2-5, cols 2-5):
+        // . # . .
+        // # # . .
+        // # . . .
+        // . . . .
+        let expected: u16 = 0b0100_1100_1000_0000;
+
+        assert_eq!(
+            result, expected,
+            "\nExpected: {:016b}\n     Got: {:016b}",
+            expected, result
+        );
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_glider_16cell() {
+        let rules = B3S23.compute_rules();
+        let mut buf = vec![Cell::void()];
+
+        // Glider near the center of a 16 cell
+        // Place it in the bottom-right of the nw leaf (rows 4-7, cols 4-7 relative to nw)
+        // which is the se quadrant of the nw leaf
+        //
+        // nw leaf se quadrant (rows 6-7, cols 6-7 of the nw 8x8):
+        // . . # .
+        // . . . #
+        // . # # #
+        // . . . .
+        let nw_leaf = Cell::leaf(0, 0, 0, 0b0010_0001_0111_0000);
+        let empty_leaf = Cell::leaf(0, 0, 0, 0);
+
+        let nw_idx = buf.len(); buf.push(nw_leaf);
+        let ne_idx = buf.len(); buf.push(empty_leaf);
+        let sw_idx = buf.len(); buf.push(empty_leaf);
+        let se_idx = buf.len(); buf.push(empty_leaf);
+
+        let mut cell16 = Cell::new(nw_idx, ne_idx, sw_idx, se_idx);
+
+        let result_idx = cell16.next(&rules, &mut buf);
+        let result = buf[result_idx];
+
+        let expected = Cell::leaf(0b0000_0001_0101_0011, 0, 0, 0);
+        assert_eq!(
+            result, expected,
+            "\nExpected: {:?}\n     Got: {:?}",
+            expected, result
+        );
+    }
 }
