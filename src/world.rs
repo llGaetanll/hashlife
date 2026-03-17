@@ -83,7 +83,7 @@ impl World {
     pub fn next(&mut self) {
         let mut root = self.buf[self.root];
 
-        self.root = root.next(&self.rules, &mut self.buf);
+        self.root = root.next_nophase2(&self.rules, &mut self.buf);
         self.depth -= 1;
 
         self.grow(1);
@@ -181,6 +181,31 @@ impl World {
             if y < 0 { &mut cell.sw } else { &mut cell.nw }
         } else {
             if y < 0 { &mut cell.se } else { &mut cell.ne }
+        }
+    }
+
+    /// Print the world tree structure for debugging
+    pub fn dump_tree(&self) {
+        eprintln!("World: depth={}, root={}, buf.len={}", self.depth, self.root, self.buf.len());
+        self.dump_node(self.root, self.depth, 0);
+    }
+
+    fn dump_node(&self, idx: usize, depth: u8, indent: usize) {
+        let cell = self.buf[idx];
+        let prefix = "  ".repeat(indent);
+
+        if cell.is_void() {
+            eprintln!("{prefix}[{idx}] void");
+        } else if cell.is_leaf() {
+            eprintln!("{prefix}[{idx}] {cell:?}");
+        } else if depth <= 3 {
+            // Expected a leaf or void at depth 3, but got a node — flag it
+            eprintln!("{prefix}[{idx}] BUG: node at depth {depth}: {cell:?}");
+        } else {
+            eprintln!("{prefix}[{idx}] node (depth={depth}):");
+            for child in [cell.nw, cell.ne, cell.sw, cell.se] {
+                self.dump_node(child, depth - 1, indent + 1);
+            }
         }
     }
 

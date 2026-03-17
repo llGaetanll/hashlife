@@ -123,6 +123,12 @@ impl Cell {
         self.compute_res(next, buf)
     }
 
+    /// Like `next` but skips phase 2 on all non-leaf levels, resulting in only
+    /// 1 iteration (only leaves advance time)
+    pub fn next_nophase2(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
+        self.compute_res_nophase2(next, buf)
+    }
+
     pub fn children(&self) -> Option<[usize; 4]> {
         if self.is_leaf() {
             None
@@ -166,6 +172,29 @@ impl Cell {
         // We mask leaves so that we have a way to differentiate between non-leaf cells and leaf
         // cells
         self.nw &= LEAF_MASK;
+    }
+
+    /// Like compute_res but skips phase 2 at all non-leaf levels.
+    fn compute_res_nophase2(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
+        if self.is_void() {
+            0
+        } else if self.is_leaf() {
+            self.compute_leaf_res(next) as usize
+        } else if self.is_16(buf) {
+            let cell = self.compute_node_res16_nophase2(next, buf);
+
+            let n = buf.len();
+            buf.push(cell);
+
+            n
+        } else {
+            let cell = self.compute_node_res_nophase2(next, buf);
+
+            let n = buf.len();
+            buf.push(cell);
+
+            n
+        }
     }
 
     /// Compute the result of a cell
@@ -340,6 +369,139 @@ impl Cell {
         let br_res = br.compute_res(next, buf) as u16;
 
         Cell::leaf(tl_res, tr_res, bl_res, br_res)
+    }
+
+    /// Like compute_node_res16 but skips phase 2: runs phase 1 (9 leaf results),
+    /// then extracts the center from the 9 results instead of recursing further.
+    #[rustfmt::skip]
+    fn compute_node_res16_nophase2(&self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
+        let mut nw = buf[self.nw];
+        let mut ne = buf[self.ne];
+        let mut sw = buf[self.sw];
+        let mut se = buf[self.se];
+
+        let mut n = cell_utils::h_center8(nw, ne);
+        let mut s = cell_utils::h_center8(sw, se);
+        let mut e = cell_utils::v_center8(ne, se);
+        let mut w = cell_utils::v_center8(nw, sw);
+        let mut c = cell_utils::center16(*self, buf);
+
+        // Phase 1: compute 9 leaf results (each is a 4x4 rule)
+        let n00 = nw.compute_res(next, buf) as u16;
+        let n01 =  n.compute_res(next, buf) as u16;
+        let n02 = ne.compute_res(next, buf) as u16;
+        let n10 =  w.compute_res(next, buf) as u16;
+        let n11 =  c.compute_res(next, buf) as u16;
+        let n12 =  e.compute_res(next, buf) as u16;
+        let n20 = sw.compute_res(next, buf) as u16;
+        let n21 =  s.compute_res(next, buf) as u16;
+        let n22 = se.compute_res(next, buf) as u16;
+
+        // Skip phase 2: extract the corner 2x2 from each rule to assemble the center 4x4.
+        // Each rule is a 4x4 block; we take the corner nearest the center of the 12x12 grid.
+        let center = |a: u16, b: u16, c: u16, d: u16| -> u16 {
+            let a = a & 0b0000_0000_0011_0011;  // bottom-right 2x2
+            let b = b & 0b0000_0000_1100_1100;  // bottom-left 2x2
+            let c = c & 0b0011_0011_0000_0000;  // top-right 2x2
+            let d = d & 0b1100_1100_0000_0000;  // top-left 2x2
+            (a << 10) | (b << 6) | (c >> 6) | (d >> 10)
+        };
+
+        Cell::leaf(
+            center(n00, n01, n10, n11),
+            center(n01, n02, n11, n12),
+            center(n10, n11, n20, n21),
+            center(n11, n12, n21, n22),
+        )
+    }
+
+    /// Like compute_node_res but skips phase 2 at all levels.
+    /// Phase 1 still recurses (so leaves compute), but instead of building
+    /// tl/tr/bl/br and recursing again, we extract centers from the 9 results.
+    #[rustfmt::skip]
+    fn compute_node_res_nophase2(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
+        // Determine result level from input structure before computing.
+        // If self's children are 16-cells, phase 1 results will be leaves (or void).
+        // Otherwise they'll be nodes (or void).
+        let results_are_leaves = buf[self.nw].is_16(buf)
+            || buf[self.ne].is_16(buf)
+            || buf[self.sw].is_16(buf)
+            || buf[self.se].is_16(buf);
+
+        let mut nw = buf[self.nw];
+        let mut ne = buf[self.ne];
+        let mut sw = buf[self.sw];
+        let mut se = buf[self.se];
+
+        let mut n = cell_utils::h_center(nw, ne);
+        let mut s = cell_utils::h_center(sw, se);
+        let mut e = cell_utils::v_center(ne, se);
+        let mut w = cell_utils::v_center(nw, sw);
+        let mut c = cell_utils::center(*self, buf);
+
+        // Phase 1 with nophase2 recursion
+        let n00 = nw.compute_res_nophase2(next, buf);
+        let n01 =  n.compute_res_nophase2(next, buf);
+        let n02 = ne.compute_res_nophase2(next, buf);
+        let n10 =  w.compute_res_nophase2(next, buf);
+        let n11 =  c.compute_res_nophase2(next, buf);
+        let n12 =  e.compute_res_nophase2(next, buf);
+        let n20 = sw.compute_res_nophase2(next, buf);
+        let n21 =  s.compute_res_nophase2(next, buf);
+        let n22 = se.compute_res_nophase2(next, buf);
+
+        // Skip phase 2: extract center of each would-be quadrant.
+        // If results are leaves (depth 5 case), use center16-style leaf extraction.
+        // Otherwise use center-style node extraction.
+        if results_are_leaves {
+            // Results are leaves — extract center as a leaf (like center16)
+            let center_leaf = |a: usize, b: usize, c: usize, d: usize| -> Cell {
+                let nw = buf[a].se as u16;
+                let ne = buf[b].sw as u16;
+                let sw = buf[c].ne as u16;
+                let se = (buf[d].nw & !LEAF_MASK) as u16;
+                Cell::leaf(nw, ne, sw, se)
+            };
+
+            let tl = center_leaf(n00, n01, n10, n11);
+            let tr = center_leaf(n01, n02, n11, n12);
+            let bl = center_leaf(n10, n11, n20, n21);
+            let br = center_leaf(n11, n12, n21, n22);
+
+            let tl_idx = buf.len(); buf.push(tl);
+            let tr_idx = buf.len(); buf.push(tr);
+            let bl_idx = buf.len(); buf.push(bl);
+            let br_idx = buf.len(); buf.push(br);
+
+            Cell {
+                nw: tl_idx,
+                ne: tr_idx,
+                sw: bl_idx,
+                se: br_idx,
+            }
+        } else {
+            // Results are nodes — extract center normally
+            let center4 = |a, b, c, d| -> Cell {
+                cell_utils::center(Cell::new(a, b, c, d), buf)
+            };
+
+            let tl = center4(n00, n01, n10, n11);
+            let tr = center4(n01, n02, n11, n12);
+            let bl = center4(n10, n11, n20, n21);
+            let br = center4(n11, n12, n21, n22);
+
+            let tl_idx = buf.len(); buf.push(tl);
+            let tr_idx = buf.len(); buf.push(tr);
+            let bl_idx = buf.len(); buf.push(bl);
+            let br_idx = buf.len(); buf.push(br);
+
+            Cell {
+                nw: tl_idx,
+                ne: tr_idx,
+                sw: bl_idx,
+                se: br_idx,
+            }
+        }
     }
 
     /// Computes the result of a 2^k cell for k > 4 (i.e. at least 32 cells)
@@ -648,7 +810,7 @@ mod cell_utils {
 }
 
 /// Draws a 4 cell
-fn draw_rule(cam: &mut Camera, rule: u16, dx: CellOffset, dy: CellOffset) {
+fn draw_rule(cam: &mut impl Camera, rule: u16, dx: CellOffset, dy: CellOffset) {
     let mut mask = 1 << 0xF;
 
     let (mut x, mut y) = (0, 0);
@@ -668,7 +830,7 @@ fn draw_rule(cam: &mut Camera, rule: u16, dx: CellOffset, dy: CellOffset) {
 }
 
 /// Draws an 8 cell
-fn draw_leaf(cam: &mut Camera, mut cell: Cell, dx: CellOffset, dy: CellOffset) {
+fn draw_leaf(cam: &mut impl Camera, mut cell: Cell, dx: CellOffset, dy: CellOffset) {
     assert!(cell.is_leaf());
 
     cell.unmask_leaf();
@@ -685,7 +847,7 @@ fn draw_leaf(cam: &mut Camera, mut cell: Cell, dx: CellOffset, dy: CellOffset) {
 
 /// Draws a 2^k cell for k > 3
 fn draw_cell(
-    cam: &mut Camera,
+    cam: &mut impl Camera,
     cell: Cell,
     cells: &[Cell],
     depth: u8,
@@ -792,6 +954,149 @@ mod test_next {
             result, expected,
             "\nExpected: {:?}\n     Got: {:?}",
             expected, result
+        );
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_glider_16cell_nophase2() {
+        let rules = B3S23.compute_rules();
+        let mut buf = vec![Cell::void()];
+
+        // Same glider as test_glider_16cell: in the nw leaf's se quadrant
+        // . . # .
+        // . . . #
+        // . # # #
+        // . . . .
+        let nw_leaf = Cell::leaf(0, 0, 0, 0b0010_0001_0111_0000);
+        let empty_leaf = Cell::leaf(0, 0, 0, 0);
+
+        let nw_idx = buf.len(); buf.push(nw_leaf);
+        let ne_idx = buf.len(); buf.push(empty_leaf);
+        let sw_idx = buf.len(); buf.push(empty_leaf);
+        let se_idx = buf.len(); buf.push(empty_leaf);
+
+        let mut cell16 = Cell::new(nw_idx, ne_idx, sw_idx, se_idx);
+
+        // Also run the full next() for comparison (need fresh buf/cell)
+        let mut buf2 = vec![Cell::void()];
+        let nw_idx = buf2.len(); buf2.push(Cell::leaf(0, 0, 0, 0b0010_0001_0111_0000));
+        let ne_idx = buf2.len(); buf2.push(Cell::leaf(0, 0, 0, 0));
+        let sw_idx = buf2.len(); buf2.push(Cell::leaf(0, 0, 0, 0));
+        let se_idx = buf2.len(); buf2.push(Cell::leaf(0, 0, 0, 0));
+        let mut cell16_full = Cell::new(nw_idx, ne_idx, sw_idx, se_idx);
+        let full_idx = cell16_full.next(&rules, &mut buf2);
+        let full_result = buf2[full_idx];
+
+        // nophase2 should advance only 1 iteration instead of 2
+        let result_idx = cell16.next_nophase2(&rules, &mut buf);
+        let result = buf[result_idx];
+
+        // Visualize input, nophase2 result, and full result
+        use crate::camera::CameraBlock;
+
+        // Camera size is in block chars: each char = 1px wide, 2px tall
+        // So for 16x16 cells we need 16 cols x 8 rows
+        let mut cam = CameraBlock::new(16, 8);
+        super::draw_cell(&mut cam, cell16, &buf, 1, 0, 0);
+        cam.invert();
+        eprintln!("Input 16-cell (16x16):\n{}", cam.render());
+
+        // For 8x8 cells we need 8 cols x 4 rows
+        let mut cam = CameraBlock::new(8, 4);
+        super::draw_leaf(&mut cam, result, 0, 0);
+        cam.invert();
+        eprintln!("nophase2 result (8x8, 1 iter):\n{}", cam.render());
+
+        let mut cam = CameraBlock::new(8, 4);
+        super::draw_leaf(&mut cam, full_result, 0, 0);
+        cam.invert();
+        eprintln!("full result (8x8, 2 iter):\n{}", cam.render());
+
+        // nophase2 on a 16-cell advances 1 iteration (half of next's 2)
+        // The glider after 1 step should appear in the nw quadrant of the result
+        let expected = Cell::leaf(0b0000_0101_0011_0010, 0, 0, 0);
+        assert_eq!(
+            result, expected,
+            "\nExpected: {:?}\n     Got: {:?}",
+            expected, result
+        );
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_glider_32cell_nophase2() {
+        let rules = B3S23.compute_rules();
+        let mut buf = vec![Cell::void()];
+
+        let empty_leaf = Cell::leaf(0, 0, 0, 0);
+
+        // Glider in the SE quadrant of the SE leaf of the NW 16-cell
+        // This places it near the center of the 32-cell (rows 12-15, cols 12-15)
+        // . . # .
+        // . . . #
+        // . # # #
+        // . . . .
+        let glider_leaf = Cell::leaf(0, 0, 0, 0b0010_0001_0111_0000);
+
+        // Build NW 16-cell: glider in se leaf, rest empty
+        let e1_idx = buf.len(); buf.push(empty_leaf);
+        let e2_idx = buf.len(); buf.push(empty_leaf);
+        let e3_idx = buf.len(); buf.push(empty_leaf);
+        let gl_idx = buf.len(); buf.push(glider_leaf);
+        let nw16 = Cell::new(e1_idx, e2_idx, e3_idx, gl_idx);
+        let nw16_idx = buf.len(); buf.push(nw16);
+
+        // Build 3 empty 16-cells
+        let e4_idx = buf.len(); buf.push(empty_leaf);
+        let e5_idx = buf.len(); buf.push(empty_leaf);
+        let e6_idx = buf.len(); buf.push(empty_leaf);
+        let e7_idx = buf.len(); buf.push(empty_leaf);
+        let empty16 = Cell::new(e4_idx, e5_idx, e6_idx, e7_idx);
+        let ne16_idx = buf.len(); buf.push(empty16);
+        let sw16_idx = buf.len(); buf.push(empty16);
+        let se16_idx = buf.len(); buf.push(empty16);
+
+        let mut cell32 = Cell::new(nw16_idx, ne16_idx, sw16_idx, se16_idx);
+
+        use crate::camera::CameraBlock;
+
+        // Input: 32x32 → 32 cols x 16 rows in block chars (draw before next mutates buf)
+        let mut cam = CameraBlock::new(32, 16);
+        super::draw_cell(&mut cam, cell32, &buf, 2, 0, 0);
+        cam.invert();
+        eprintln!("Input 32-cell (32x32):\n{}", cam.render());
+
+        // Also run full next() for comparison
+        let mut buf2 = buf.clone();
+        let mut cell32_full = cell32;
+        let full_idx = cell32_full.next(&rules, &mut buf2);
+        let full_result = buf2[full_idx];
+
+        // nophase2 should advance only 1 iteration
+        let result_idx = cell32.next_nophase2(&rules, &mut buf);
+        let result = buf[result_idx];
+
+        let mut cam = CameraBlock::new(16, 8);
+        super::draw_cell(&mut cam, result, &buf, 1, 0, 0);
+        cam.invert();
+        eprintln!("nophase2 result (16x16, 1 iter):\n{}", cam.render());
+
+        let mut cam = CameraBlock::new(16, 8);
+        super::draw_cell(&mut cam, full_result, &buf2, 1, 0, 0);
+        cam.invert();
+        eprintln!("full result (16x16, 4 iter):\n{}", cam.render());
+
+        // nophase2 result is a 16-cell (children are leaves)
+        assert!(buf[result.nw].is_leaf(), "result should be a 16-cell");
+
+        // The glider after 1 step should appear in the nw leaf of the result
+        let nw_leaf = buf[result.nw];
+        let expected_nw = Cell::leaf(0, 0, 0, 0b0000_0101_0011_0010);
+        assert_eq!(
+            nw_leaf, expected_nw,
+            "\nExpected nw: {:?}\n     Got nw: {:?}",
+            expected_nw, nw_leaf
         );
     }
 }
