@@ -1,5 +1,5 @@
+use log::warn;
 use thiserror::Error;
-use tracing::warn;
 
 use crate::WorldOffset;
 use crate::rle_data::RleBufWrite;

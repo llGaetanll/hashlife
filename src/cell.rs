@@ -1,9 +1,3 @@
-use tracing::debug;
-use tracing::trace;
-
-use crate::CellOffset;
-use crate::camera::Camera;
-
 /// On 64 bit machines: 1 followed by 63 0s, `9_223_372_036_854_775_808`.
 /// On 32 bit machines: 1 followed by 31 0s, `2_147_483_648`.
 ///
@@ -204,24 +198,12 @@ impl Cell {
     /// A rule is just returned as a usize, but a cell is inserted into the buf and its index is
     /// returned
     fn compute_res(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
-        trace!("Compute res quadrants");
-        trace!("nw: {}", self.nw);
-        trace!("ne: {}", self.ne);
-        trace!("sw: {}", self.sw);
-        trace!("se: {}", self.se);
-
         if self.is_void() {
             0
         } else if self.is_leaf() {
-            debug!("Computing leaf res");
-            debug_draw(*self, buf, 0);
-
             // NOTE: We only get here if called from `next`
             self.compute_leaf_res(next) as usize
         } else if self.is_16(buf) {
-            debug!("Computing 16 cell res");
-            debug_draw(*self, buf, 1);
-
             let cell = self.compute_node_res16(next, buf);
 
             let n = buf.len();
@@ -229,8 +211,6 @@ impl Cell {
 
             n
         } else {
-            debug!("Computing node res");
-
             let cell = self.compute_node_res(next, buf); //
 
             let n = buf.len();
@@ -278,21 +258,6 @@ impl Cell {
 
             let t22 =   self.se as u16 & 0b0000_0110_0110_0000;
 
-            trace!("nw:  {:016b}", self.nw);
-            trace!("ne:  {:016b}", self.ne);
-            trace!("sw:  {:016b}", self.sw);
-            trace!("se:  {:016b}", self.se);
-
-            trace!("t00: {t00:016b}");
-            trace!("t01: {t01:016b}");
-            trace!("t02: {t02:016b}");
-            trace!("t10: {t10:016b}");
-            trace!("t11: {t11:016b}");
-            trace!("t12: {t12:016b}");
-            trace!("t20: {t20:016b}");
-            trace!("t21: {t21:016b}");
-            trace!("t22: {t22:016b}");
-
             // t00 t01 t02
             // t10 t11 t12
             // t20 t21 t22
@@ -301,17 +266,10 @@ impl Cell {
             let bl = (t10 << 5) | (t11 << 3) | (t20 >> 3) | (t21 >> 5);
             let br = (t11 << 5) | (t12 << 3) | (t21 >> 3) | (t22 >> 5);
 
-            trace!("tl:  {tl:016b}");
-            trace!("tr:  {tr:016b}");
-            trace!("bl:  {bl:016b}");
-            trace!("br:  {br:016b}");
-
             rule = (next[tl as usize] << 5)
                  | (next[tr as usize] << 3)
                  | (next[bl as usize] >> 3)
                  | (next[br as usize] >> 5);
-
-            trace!("res: {rule:016b}");
         }
         self.mask_leaf();
 
@@ -327,11 +285,6 @@ impl Cell {
         let mut ne = buf[self.ne];
         let mut sw = buf[self.sw];
         let mut se = buf[self.se];
-
-        trace!("nw: {:?}", nw);
-        trace!("ne: {:?}", ne);
-        trace!("sw: {:?}", sw);
-        trace!("se: {:?}", se);
 
         // cardinal pseudo-leaves
         let mut n = cell_utils::h_center8(nw, ne);
@@ -513,22 +466,6 @@ impl Cell {
         let mut sw = buf[self.sw];
         let mut se = buf[self.se];
 
-        debug!("nw:");
-        debug_draw(nw, buf, 1);
-        trace!("nw: {:?}", nw);
-
-        debug!("ne:");
-        debug_draw(ne, buf, 1);
-        trace!("ne: {:?}", ne);
-
-        debug!("sw:");
-        debug_draw(sw, buf, 1);
-        trace!("sw: {:?}", sw);
-
-        debug!("se:");
-        debug_draw(se, buf, 1);
-        trace!("se: {:?}", se);
-
         // cardinal pseudo-cells
         let mut n = cell_utils::h_center(nw, ne);
         let mut s = cell_utils::h_center(sw, se);
@@ -540,40 +477,14 @@ impl Cell {
 
         // All of these are cells
         let n00 = nw.compute_res(next, buf);
-        debug!("n00");
-        debug_draw(buf[n00], buf, 1);
-
         let n01 =  n.compute_res(next, buf);
-        debug!("n01");
-        debug_draw(buf[n01], buf, 1);
-
         let n02 = ne.compute_res(next, buf);
-        debug!("n02");
-        debug_draw(buf[n02], buf, 1);
-
         let n10 =  w.compute_res(next, buf);
-        debug!("n10");
-        debug_draw(buf[n10], buf, 1);
-
         let n11 =  c.compute_res(next, buf);
-        debug!("n11");
-        debug_draw(buf[n11], buf, 1);
-
         let n12 =  e.compute_res(next, buf);
-        debug!("n12");
-        debug_draw(buf[n12], buf, 1);
-
         let n20 = sw.compute_res(next, buf);
-        debug!("n20");
-        debug_draw(buf[n20], buf, 1);
-
         let n21 =  s.compute_res(next, buf);
-        debug!("n21");
-        debug_draw(buf[n21], buf, 1);
-
         let n22 = se.compute_res(next, buf);
-        debug!("n22");
-        debug_draw(buf[n22], buf, 1);
 
         // n00 n01 n02
         // n10 n11 n12
@@ -583,46 +494,17 @@ impl Cell {
         let mut bl = Cell::new(n10, n11, n20, n21);
         let mut br = Cell::new(n11, n12, n21, n22);
 
-        debug!("tl:");
-        debug_draw(tl, buf, 1);
-
-        debug!("tr:");
-        debug_draw(tr, buf, 1);
-
-        debug!("bl:");
-        debug_draw(bl, buf, 1);
-
-        debug!("br:");
-        debug_draw(br, buf, 1);
-
         let nw = tl.compute_res(next, buf);
         let ne = tr.compute_res(next, buf);
         let sw = bl.compute_res(next, buf);
         let se = br.compute_res(next, buf);
 
-        debug!("tl res:");
-        debug_draw(buf[nw], buf, 0);
-
-        debug!("tr res:");
-        debug_draw(buf[ne], buf, 0);
-
-        debug!("bl res:");
-        debug_draw(buf[sw], buf, 0);
-
-        debug!("br res:");
-        debug_draw(buf[se], buf, 0);
-
-        let res = Cell {
+        Cell {
             nw,
             ne,
             sw,
             se,
-        };
-
-        debug!("Final res:");
-        debug_draw(res, buf, 1);
-
-        res
+        }
     }
 
     /// Hash the cell
@@ -690,8 +572,6 @@ mod cell_utils {
     use crate::cell::Cell;
     use crate::cell::LEAF_MASK;
 
-    use tracing::trace;
-
     /// Takes as input a rule return a `Cell` with that rule about its center
     pub fn rule_to_leaf(rule: u16) -> Cell {
         let nw = (rule & 0b1100_1100_0000_0000) >> 10;
@@ -735,9 +615,6 @@ mod cell_utils {
 
     /// Given two 8 cells `w` and `e`, returns the leaf at their center.
     pub fn h_center8(w: Cell, e: Cell) -> Cell {
-        trace!("w: {w:?}");
-        trace!("e: {e:?}");
-
         let nw = w.ne as u16;
         let ne = (e.nw & !LEAF_MASK) as u16;
         let sw = w.se as u16;
@@ -753,18 +630,10 @@ mod cell_utils {
 
     /// Given two 8 cells `n` and `s`, returns the leaf at their center.
     pub fn v_center8(n: Cell, s: Cell) -> Cell {
-        trace!("n: {n:?}");
-        trace!("s: {s:?}");
-
         let nw = n.sw as u16;
         let ne = n.se as u16;
         let sw = (s.nw & !LEAF_MASK) as u16;
         let se = s.ne as u16;
-
-        trace!("nw: {nw:016b}");
-        trace!("ne: {ne:016b}");
-        trace!("sw: {sw:016b}");
-        trace!("se: {se:016b}");
 
         Cell {
             nw: nw as usize | LEAF_MASK,
@@ -784,21 +653,11 @@ mod cell_utils {
         let sw = buf[cell.sw];
         let se = buf[cell.se];
 
-        trace!("nw: {nw:?}");
-        trace!("ne: {ne:?}");
-        trace!("sw: {sw:?}");
-        trace!("se: {se:?}");
-
         // These are rules, since the cell is not a grandparent
         let nw = nw.se as u16;
         let ne = ne.sw as u16;
         let sw = sw.ne as u16;
         let se = (se.nw & !LEAF_MASK) as u16;
-
-        trace!("nw: {nw:016b}");
-        trace!("ne: {ne:016b}");
-        trace!("sw: {sw:016b}");
-        trace!("se: {se:016b}");
 
         Cell {
             nw: nw as usize | LEAF_MASK,
@@ -809,84 +668,73 @@ mod cell_utils {
     }
 }
 
-/// Draws a 4 cell
-fn draw_rule(cam: &mut impl Camera, rule: u16, dx: CellOffset, dy: CellOffset) {
-    let mut mask = 1 << 0xF;
-
-    let (mut x, mut y) = (0, 0);
-    while mask > 0 {
-        if rule & mask == mask {
-            cam.draw_pixel(x + dx, y + dy);
-        }
-
-        x = (x + 1) % 4;
-
-        if x == 0 {
-            y += 1;
-        }
-
-        mask >>= 1;
-    }
-}
-
-/// Draws an 8 cell
-fn draw_leaf(cam: &mut impl Camera, mut cell: Cell, dx: CellOffset, dy: CellOffset) {
-    assert!(cell.is_leaf());
-
-    cell.unmask_leaf();
-    {
-        let Cell { nw, ne, sw, se, .. } = cell;
-
-        draw_rule(cam, nw as u16, dx, dy);
-        draw_rule(cam, ne as u16, dx + 4, dy);
-        draw_rule(cam, sw as u16, dx, dy + 4);
-        draw_rule(cam, se as u16, dx + 4, dy + 4);
-    }
-    cell.mask_leaf();
-}
-
-/// Draws a 2^k cell for k > 3
-fn draw_cell(
-    cam: &mut impl Camera,
-    cell: Cell,
-    cells: &[Cell],
-    depth: u8,
-    dx: CellOffset,
-    dy: CellOffset,
-) {
-    if cell.is_leaf() {
-        draw_leaf(cam, cell, dx, dy);
-    } else {
-        assert!(depth > 0, "Expected non-zero depth for non-leaf node");
-
-        let Cell { nw, ne, sw, se, .. } = cell;
-
-        let d = 2usize.pow(2 + depth as u32) as CellOffset;
-
-        draw_cell(cam, cells[nw], cells, depth - 1, dx, dy);
-        draw_cell(cam, cells[ne], cells, depth - 1, dx + d, dy);
-        draw_cell(cam, cells[sw], cells, depth - 1, dx, dy + d);
-        draw_cell(cam, cells[se], cells, depth - 1, dx + d, dy + d);
-    }
-}
-
-fn debug_draw(cell: Cell, cells: &[Cell], depth: u8) {
-    // if enabled!(Level::DEBUG) {
-    //     let sl = 2usize.pow(depth as u32 + 3);
-    //     let mut cam = Camera::new(sl, sl);
-    //
-    //     draw_cell(&mut cam, cell, cells, depth, 0, 0);
-    //
-    //     let s = cam.render();
-    //
-    //     debug!("\n{s}");
-    // }
-}
-
 #[cfg(test)]
 mod test_next {
+    use crate::CellOffset;
+    use crate::camera::Camera;
     use crate::cell::Cell;
     use crate::rule_set::B3S23;
+
+    /// Draws a 4 cell
+    fn draw_rule(cam: &mut impl Camera, rule: u16, dx: CellOffset, dy: CellOffset) {
+        let mut mask = 1 << 0xF;
+
+        let (mut x, mut y) = (0, 0);
+        while mask > 0 {
+            if rule & mask == mask {
+                cam.draw_pixel(x + dx, y + dy);
+            }
+
+            x = (x + 1) % 4;
+
+            if x == 0 {
+                y += 1;
+            }
+
+            mask >>= 1;
+        }
+    }
+
+    /// Draws an 8 cell
+    fn draw_leaf(cam: &mut impl Camera, mut cell: Cell, dx: CellOffset, dy: CellOffset) {
+        assert!(cell.is_leaf());
+
+        cell.unmask_leaf();
+        {
+            let Cell { nw, ne, sw, se, .. } = cell;
+
+            draw_rule(cam, nw as u16, dx, dy);
+            draw_rule(cam, ne as u16, dx + 4, dy);
+            draw_rule(cam, sw as u16, dx, dy + 4);
+            draw_rule(cam, se as u16, dx + 4, dy + 4);
+        }
+        cell.mask_leaf();
+    }
+
+    /// Draws a 2^k cell for k > 3
+    fn draw_cell(
+        cam: &mut impl Camera,
+        cell: Cell,
+        cells: &[Cell],
+        depth: u8,
+        dx: CellOffset,
+        dy: CellOffset,
+    ) {
+        if cell.is_leaf() {
+            draw_leaf(cam, cell, dx, dy);
+        } else {
+            assert!(depth > 0, "Expected non-zero depth for non-leaf node");
+
+            let Cell { nw, ne, sw, se, .. } = cell;
+
+            let d = 2usize.pow(2 + depth as u32) as CellOffset;
+
+            draw_cell(cam, cells[nw], cells, depth - 1, dx, dy);
+            draw_cell(cam, cells[ne], cells, depth - 1, dx + d, dy);
+            draw_cell(cam, cells[sw], cells, depth - 1, dx, dy + d);
+            draw_cell(cam, cells[se], cells, depth - 1, dx + d, dy + d);
+        }
+    }
 
     #[test]
     fn test_glider_leaf() {
@@ -998,18 +846,18 @@ mod test_next {
         // Camera size is in block chars: each char = 1px wide, 2px tall
         // So for 16x16 cells we need 16 cols x 8 rows
         let mut cam = CameraBlock::new(16, 8);
-        super::draw_cell(&mut cam, cell16, &buf, 1, 0, 0);
+        draw_cell(&mut cam, cell16, &buf, 1, 0, 0);
         cam.invert();
         eprintln!("Input 16-cell (16x16):\n{}", cam.render());
 
         // For 8x8 cells we need 8 cols x 4 rows
         let mut cam = CameraBlock::new(8, 4);
-        super::draw_leaf(&mut cam, result, 0, 0);
+        draw_leaf(&mut cam, result, 0, 0);
         cam.invert();
         eprintln!("nophase2 result (8x8, 1 iter):\n{}", cam.render());
 
         let mut cam = CameraBlock::new(8, 4);
-        super::draw_leaf(&mut cam, full_result, 0, 0);
+        draw_leaf(&mut cam, full_result, 0, 0);
         cam.invert();
         eprintln!("full result (8x8, 2 iter):\n{}", cam.render());
 
@@ -1063,7 +911,7 @@ mod test_next {
 
         // Input: 32x32 → 32 cols x 16 rows in block chars (draw before next mutates buf)
         let mut cam = CameraBlock::new(32, 16);
-        super::draw_cell(&mut cam, cell32, &buf, 2, 0, 0);
+        draw_cell(&mut cam, cell32, &buf, 2, 0, 0);
         cam.invert();
         eprintln!("Input 32-cell (32x32):\n{}", cam.render());
 
@@ -1078,12 +926,12 @@ mod test_next {
         let result = buf[result_idx];
 
         let mut cam = CameraBlock::new(16, 8);
-        super::draw_cell(&mut cam, result, &buf, 1, 0, 0);
+        draw_cell(&mut cam, result, &buf, 1, 0, 0);
         cam.invert();
         eprintln!("nophase2 result (16x16, 1 iter):\n{}", cam.render());
 
         let mut cam = CameraBlock::new(16, 8);
-        super::draw_cell(&mut cam, full_result, &buf2, 1, 0, 0);
+        draw_cell(&mut cam, full_result, &buf2, 1, 0, 0);
         cam.invert();
         eprintln!("full result (16x16, 4 iter):\n{}", cam.render());
 
