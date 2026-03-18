@@ -120,7 +120,7 @@ impl Cell {
     /// Like `next` but skips phase 2 on all non-leaf levels, resulting in only
     /// 1 iteration (only leaves advance time)
     pub fn next_nophase2(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
-        self.compute_res_nophase2(next, buf)
+        self.compute_res_once(next, buf)
     }
 
     pub fn children(&self) -> Option<[usize; 4]> {
@@ -168,29 +168,6 @@ impl Cell {
         self.nw &= LEAF_MASK;
     }
 
-    /// Like compute_res but skips phase 2 at all non-leaf levels.
-    fn compute_res_nophase2(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
-        if self.is_void() {
-            0
-        } else if self.is_leaf() {
-            self.compute_leaf_res(next) as usize
-        } else if self.is_16(buf) {
-            let cell = self.compute_node_res16_nophase2(next, buf);
-
-            let n = buf.len();
-            buf.push(cell);
-
-            n
-        } else {
-            let cell = self.compute_node_res_nophase2(next, buf);
-
-            let n = buf.len();
-            buf.push(cell);
-
-            n
-        }
-    }
-
     /// Compute the result of a cell
     ///
     /// The `usize` returned is either an index or a rule.
@@ -218,6 +195,260 @@ impl Cell {
 
             n
         }
+    }
+
+    /// Like compute_res but skips phase 2 at all non-leaf levels.
+    fn compute_res_once(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
+        if self.is_void() {
+            0
+        } else if self.is_leaf() {
+            self.compute_leaf_res(next) as usize
+        } else if self.is_16(buf) {
+            let cell = self.compute_node_res16_once(next, buf);
+
+            let n = buf.len();
+            buf.push(cell);
+
+            n
+        } else {
+            let cell = self.compute_node_res_once(next, buf);
+
+            let n = buf.len();
+            buf.push(cell);
+
+            n
+        }
+    }
+
+    /// Computes the result of a 2^k cell for k > 4 (i.e. at least 32 cells)
+    #[rustfmt::skip]
+    fn compute_node_res(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
+        // at least 16 cells
+        let mut nw = buf[self.nw];
+        let mut ne = buf[self.ne];
+        let mut sw = buf[self.sw];
+        let mut se = buf[self.se];
+
+        // cardinal pseudo-cells
+        let mut n = cell_utils::h_center(nw, ne);
+        let mut s = cell_utils::h_center(sw, se);
+        let mut e = cell_utils::v_center(ne, se);
+        let mut w = cell_utils::v_center(nw, sw);
+
+        // center n/2 cell of n cell
+        let mut c = cell_utils::center(*self, buf);
+
+        // All of these are cells
+        let n00 = nw.compute_res(next, buf);
+        let n01 =  n.compute_res(next, buf);
+        let n02 = ne.compute_res(next, buf);
+        let n10 =  w.compute_res(next, buf);
+        let n11 =  c.compute_res(next, buf);
+        let n12 =  e.compute_res(next, buf);
+        let n20 = sw.compute_res(next, buf);
+        let n21 =  s.compute_res(next, buf);
+        let n22 = se.compute_res(next, buf);
+
+        // n00 n01 n02
+        // n10 n11 n12
+        // n20 n21 n22
+        let mut tl = Cell::new(n00, n01, n10, n11);
+        let mut tr = Cell::new(n01, n02, n11, n12);
+        let mut bl = Cell::new(n10, n11, n20, n21);
+        let mut br = Cell::new(n11, n12, n21, n22);
+
+        let nw = tl.compute_res(next, buf);
+        let ne = tr.compute_res(next, buf);
+        let sw = bl.compute_res(next, buf);
+        let se = br.compute_res(next, buf);
+
+        Cell {
+            nw,
+            ne,
+            sw,
+            se,
+        }
+    }
+
+    /// Like compute_node_res but skips phase 2 at all levels.
+    /// Leaves still compute, but instead of building tl/tr/bl/br and recursing again, we extract
+    /// centers from the 9 results.
+    #[rustfmt::skip]
+    fn compute_node_res_once(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
+        // Determine result level from input structure before computing.
+        // If self's children are 16-cells, phase 1 results will be leaves (or void).
+        // Otherwise they'll be nodes (or void).
+        let results_are_leaves = buf[self.nw].is_16(buf)
+            || buf[self.ne].is_16(buf)
+            || buf[self.sw].is_16(buf)
+            || buf[self.se].is_16(buf);
+
+        let mut nw = buf[self.nw];
+        let mut ne = buf[self.ne];
+        let mut sw = buf[self.sw];
+        let mut se = buf[self.se];
+
+        let mut n = cell_utils::h_center(nw, ne);
+        let mut s = cell_utils::h_center(sw, se);
+        let mut e = cell_utils::v_center(ne, se);
+        let mut w = cell_utils::v_center(nw, sw);
+        let mut c = cell_utils::center(*self, buf);
+
+        // Phase 1 with nophase2 recursion
+        let n00 = nw.compute_res_once(next, buf);
+        let n01 =  n.compute_res_once(next, buf);
+        let n02 = ne.compute_res_once(next, buf);
+        let n10 =  w.compute_res_once(next, buf);
+        let n11 =  c.compute_res_once(next, buf);
+        let n12 =  e.compute_res_once(next, buf);
+        let n20 = sw.compute_res_once(next, buf);
+        let n21 =  s.compute_res_once(next, buf);
+        let n22 = se.compute_res_once(next, buf);
+
+        // Skip phase 2: extract center of each would-be quadrant.
+        // If results are leaves (depth 5 case), use center16-style leaf extraction.
+        // Otherwise use center-style node extraction.
+        if results_are_leaves {
+            // Results are leaves — extract center as a leaf (like center16)
+            let center_leaf = |a: usize, b: usize, c: usize, d: usize| -> Cell {
+                let nw = buf[a].se as u16;
+                let ne = buf[b].sw as u16;
+                let sw = buf[c].ne as u16;
+                let se = (buf[d].nw & !LEAF_MASK) as u16;
+                Cell::leaf(nw, ne, sw, se)
+            };
+
+            let tl = center_leaf(n00, n01, n10, n11);
+            let tr = center_leaf(n01, n02, n11, n12);
+            let bl = center_leaf(n10, n11, n20, n21);
+            let br = center_leaf(n11, n12, n21, n22);
+
+            let tl_idx = buf.len(); buf.push(tl);
+            let tr_idx = buf.len(); buf.push(tr);
+            let bl_idx = buf.len(); buf.push(bl);
+            let br_idx = buf.len(); buf.push(br);
+
+            Cell {
+                nw: tl_idx,
+                ne: tr_idx,
+                sw: bl_idx,
+                se: br_idx,
+            }
+        } else {
+            // Results are nodes — extract center normally
+            let center4 = |a, b, c, d| -> Cell {
+                cell_utils::center(Cell::new(a, b, c, d), buf)
+            };
+
+            let tl = center4(n00, n01, n10, n11);
+            let tr = center4(n01, n02, n11, n12);
+            let bl = center4(n10, n11, n20, n21);
+            let br = center4(n11, n12, n21, n22);
+
+            let tl_idx = buf.len(); buf.push(tl);
+            let tr_idx = buf.len(); buf.push(tr);
+            let bl_idx = buf.len(); buf.push(bl);
+            let br_idx = buf.len(); buf.push(br);
+
+            Cell {
+                nw: tl_idx,
+                ne: tr_idx,
+                sw: bl_idx,
+                se: br_idx,
+            }
+        }
+    }
+
+    /// Computes the result of a 16 cell
+    /// Returns an 8 cell
+    #[rustfmt::skip]
+    fn compute_node_res16(&self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
+        // these are leaves
+        let mut nw = buf[self.nw];
+        let mut ne = buf[self.ne];
+        let mut sw = buf[self.sw];
+        let mut se = buf[self.se];
+
+        // cardinal pseudo-leaves
+        let mut n = cell_utils::h_center8(nw, ne);
+        let mut s = cell_utils::h_center8(sw, se);
+        let mut e = cell_utils::v_center8(ne, se);
+        let mut w = cell_utils::v_center8(nw, sw);
+
+        // center 8 leaf of 16 cell
+        let mut c = cell_utils::center16(*self, buf);
+
+        // NOTE: This downcast is safe. The only way down from here is either void or leaf
+        // All of these are rules
+        let n00 = nw.compute_res(next, buf) as u16;
+        let n01 =  n.compute_res(next, buf) as u16;
+        let n02 = ne.compute_res(next, buf) as u16;
+        let n10 =  w.compute_res(next, buf) as u16;
+        let n11 =  c.compute_res(next, buf) as u16;
+        let n12 =  e.compute_res(next, buf) as u16;
+        let n20 = sw.compute_res(next, buf) as u16;
+        let n21 =  s.compute_res(next, buf) as u16;
+        let n22 = se.compute_res(next, buf) as u16;
+
+        // n00 n01 n02
+        // n10 n11 n12
+        // n20 n21 n22
+        let mut tl = Cell::leaf(n00, n01, n10, n11);
+        let mut tr = Cell::leaf(n01, n02, n11, n12);
+        let mut bl = Cell::leaf(n10, n11, n20, n21);
+        let mut br = Cell::leaf(n11, n12, n21, n22);
+
+        // NOTE: This downcast is safe for the same reason as the one above
+        let tl_res = tl.compute_res(next, buf) as u16;
+        let tr_res = tr.compute_res(next, buf) as u16;
+        let bl_res = bl.compute_res(next, buf) as u16;
+        let br_res = br.compute_res(next, buf) as u16;
+
+        Cell::leaf(tl_res, tr_res, bl_res, br_res)
+    }
+
+    /// Like compute_node_res16 but skips phase 2: runs phase 1 (9 leaf results),
+    /// then extracts the center from the 9 results instead of recursing further.
+    #[rustfmt::skip]
+    fn compute_node_res16_once(&self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
+        let mut nw = buf[self.nw];
+        let mut ne = buf[self.ne];
+        let mut sw = buf[self.sw];
+        let mut se = buf[self.se];
+
+        let mut n = cell_utils::h_center8(nw, ne);
+        let mut s = cell_utils::h_center8(sw, se);
+        let mut e = cell_utils::v_center8(ne, se);
+        let mut w = cell_utils::v_center8(nw, sw);
+        let mut c = cell_utils::center16(*self, buf);
+
+        // Phase 1: compute 9 leaf results (each is a 4x4 rule)
+        let n00 = nw.compute_res(next, buf) as u16;
+        let n01 =  n.compute_res(next, buf) as u16;
+        let n02 = ne.compute_res(next, buf) as u16;
+        let n10 =  w.compute_res(next, buf) as u16;
+        let n11 =  c.compute_res(next, buf) as u16;
+        let n12 =  e.compute_res(next, buf) as u16;
+        let n20 = sw.compute_res(next, buf) as u16;
+        let n21 =  s.compute_res(next, buf) as u16;
+        let n22 = se.compute_res(next, buf) as u16;
+
+        // Skip phase 2: extract the corner 2x2 from each rule to assemble the center 4x4.
+        // Each rule is a 4x4 block; we take the corner nearest the center of the 12x12 grid.
+        let center = |a: u16, b: u16, c: u16, d: u16| -> u16 {
+            let a = a & 0b0000_0000_0011_0011;  // bottom-right 2x2
+            let b = b & 0b0000_0000_1100_1100;  // bottom-left 2x2
+            let c = c & 0b0011_0011_0000_0000;  // top-right 2x2
+            let d = d & 0b1100_1100_0000_0000;  // top-left 2x2
+            (a << 10) | (b << 6) | (c >> 6) | (d >> 10)
+        };
+
+        Cell::leaf(
+            center(n00, n01, n10, n11),
+            center(n01, n02, n11, n12),
+            center(n10, n11, n20, n21),
+            center(n11, n12, n21, n22),
+        )
     }
 
     /// For a leaf cell, this computes its result.
@@ -274,237 +505,6 @@ impl Cell {
         self.mask_leaf();
 
         rule
-    }
-
-    /// Computes the result of a 16 cell
-    /// Returns an 8 cell
-    #[rustfmt::skip]
-    fn compute_node_res16(&self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
-        // these are leaves
-        let mut nw = buf[self.nw];
-        let mut ne = buf[self.ne];
-        let mut sw = buf[self.sw];
-        let mut se = buf[self.se];
-
-        // cardinal pseudo-leaves
-        let mut n = cell_utils::h_center8(nw, ne);
-        let mut s = cell_utils::h_center8(sw, se);
-        let mut e = cell_utils::v_center8(ne, se);
-        let mut w = cell_utils::v_center8(nw, sw);
-
-        // center 8 leaf of 16 cell
-        let mut c = cell_utils::center16(*self, buf);
-
-        // NOTE: This downcast is safe. The only way down from here is either void or leaf
-        // All of these are rules
-        let n00 = nw.compute_res(next, buf) as u16;
-        let n01 =  n.compute_res(next, buf) as u16;
-        let n02 = ne.compute_res(next, buf) as u16;
-        let n10 =  w.compute_res(next, buf) as u16;
-        let n11 =  c.compute_res(next, buf) as u16;
-        let n12 =  e.compute_res(next, buf) as u16;
-        let n20 = sw.compute_res(next, buf) as u16;
-        let n21 =  s.compute_res(next, buf) as u16;
-        let n22 = se.compute_res(next, buf) as u16;
-
-        // n00 n01 n02
-        // n10 n11 n12
-        // n20 n21 n22
-        let mut tl = Cell::leaf(n00, n01, n10, n11);
-        let mut tr = Cell::leaf(n01, n02, n11, n12);
-        let mut bl = Cell::leaf(n10, n11, n20, n21);
-        let mut br = Cell::leaf(n11, n12, n21, n22);
-
-        // NOTE: This downcast is safe for the same reason as the one above
-        let tl_res = tl.compute_res(next, buf) as u16;
-        let tr_res = tr.compute_res(next, buf) as u16;
-        let bl_res = bl.compute_res(next, buf) as u16;
-        let br_res = br.compute_res(next, buf) as u16;
-
-        Cell::leaf(tl_res, tr_res, bl_res, br_res)
-    }
-
-    /// Like compute_node_res16 but skips phase 2: runs phase 1 (9 leaf results),
-    /// then extracts the center from the 9 results instead of recursing further.
-    #[rustfmt::skip]
-    fn compute_node_res16_nophase2(&self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
-        let mut nw = buf[self.nw];
-        let mut ne = buf[self.ne];
-        let mut sw = buf[self.sw];
-        let mut se = buf[self.se];
-
-        let mut n = cell_utils::h_center8(nw, ne);
-        let mut s = cell_utils::h_center8(sw, se);
-        let mut e = cell_utils::v_center8(ne, se);
-        let mut w = cell_utils::v_center8(nw, sw);
-        let mut c = cell_utils::center16(*self, buf);
-
-        // Phase 1: compute 9 leaf results (each is a 4x4 rule)
-        let n00 = nw.compute_res(next, buf) as u16;
-        let n01 =  n.compute_res(next, buf) as u16;
-        let n02 = ne.compute_res(next, buf) as u16;
-        let n10 =  w.compute_res(next, buf) as u16;
-        let n11 =  c.compute_res(next, buf) as u16;
-        let n12 =  e.compute_res(next, buf) as u16;
-        let n20 = sw.compute_res(next, buf) as u16;
-        let n21 =  s.compute_res(next, buf) as u16;
-        let n22 = se.compute_res(next, buf) as u16;
-
-        // Skip phase 2: extract the corner 2x2 from each rule to assemble the center 4x4.
-        // Each rule is a 4x4 block; we take the corner nearest the center of the 12x12 grid.
-        let center = |a: u16, b: u16, c: u16, d: u16| -> u16 {
-            let a = a & 0b0000_0000_0011_0011;  // bottom-right 2x2
-            let b = b & 0b0000_0000_1100_1100;  // bottom-left 2x2
-            let c = c & 0b0011_0011_0000_0000;  // top-right 2x2
-            let d = d & 0b1100_1100_0000_0000;  // top-left 2x2
-            (a << 10) | (b << 6) | (c >> 6) | (d >> 10)
-        };
-
-        Cell::leaf(
-            center(n00, n01, n10, n11),
-            center(n01, n02, n11, n12),
-            center(n10, n11, n20, n21),
-            center(n11, n12, n21, n22),
-        )
-    }
-
-    /// Like compute_node_res but skips phase 2 at all levels.
-    /// Phase 1 still recurses (so leaves compute), but instead of building
-    /// tl/tr/bl/br and recursing again, we extract centers from the 9 results.
-    #[rustfmt::skip]
-    fn compute_node_res_nophase2(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
-        // Determine result level from input structure before computing.
-        // If self's children are 16-cells, phase 1 results will be leaves (or void).
-        // Otherwise they'll be nodes (or void).
-        let results_are_leaves = buf[self.nw].is_16(buf)
-            || buf[self.ne].is_16(buf)
-            || buf[self.sw].is_16(buf)
-            || buf[self.se].is_16(buf);
-
-        let mut nw = buf[self.nw];
-        let mut ne = buf[self.ne];
-        let mut sw = buf[self.sw];
-        let mut se = buf[self.se];
-
-        let mut n = cell_utils::h_center(nw, ne);
-        let mut s = cell_utils::h_center(sw, se);
-        let mut e = cell_utils::v_center(ne, se);
-        let mut w = cell_utils::v_center(nw, sw);
-        let mut c = cell_utils::center(*self, buf);
-
-        // Phase 1 with nophase2 recursion
-        let n00 = nw.compute_res_nophase2(next, buf);
-        let n01 =  n.compute_res_nophase2(next, buf);
-        let n02 = ne.compute_res_nophase2(next, buf);
-        let n10 =  w.compute_res_nophase2(next, buf);
-        let n11 =  c.compute_res_nophase2(next, buf);
-        let n12 =  e.compute_res_nophase2(next, buf);
-        let n20 = sw.compute_res_nophase2(next, buf);
-        let n21 =  s.compute_res_nophase2(next, buf);
-        let n22 = se.compute_res_nophase2(next, buf);
-
-        // Skip phase 2: extract center of each would-be quadrant.
-        // If results are leaves (depth 5 case), use center16-style leaf extraction.
-        // Otherwise use center-style node extraction.
-        if results_are_leaves {
-            // Results are leaves — extract center as a leaf (like center16)
-            let center_leaf = |a: usize, b: usize, c: usize, d: usize| -> Cell {
-                let nw = buf[a].se as u16;
-                let ne = buf[b].sw as u16;
-                let sw = buf[c].ne as u16;
-                let se = (buf[d].nw & !LEAF_MASK) as u16;
-                Cell::leaf(nw, ne, sw, se)
-            };
-
-            let tl = center_leaf(n00, n01, n10, n11);
-            let tr = center_leaf(n01, n02, n11, n12);
-            let bl = center_leaf(n10, n11, n20, n21);
-            let br = center_leaf(n11, n12, n21, n22);
-
-            let tl_idx = buf.len(); buf.push(tl);
-            let tr_idx = buf.len(); buf.push(tr);
-            let bl_idx = buf.len(); buf.push(bl);
-            let br_idx = buf.len(); buf.push(br);
-
-            Cell {
-                nw: tl_idx,
-                ne: tr_idx,
-                sw: bl_idx,
-                se: br_idx,
-            }
-        } else {
-            // Results are nodes — extract center normally
-            let center4 = |a, b, c, d| -> Cell {
-                cell_utils::center(Cell::new(a, b, c, d), buf)
-            };
-
-            let tl = center4(n00, n01, n10, n11);
-            let tr = center4(n01, n02, n11, n12);
-            let bl = center4(n10, n11, n20, n21);
-            let br = center4(n11, n12, n21, n22);
-
-            let tl_idx = buf.len(); buf.push(tl);
-            let tr_idx = buf.len(); buf.push(tr);
-            let bl_idx = buf.len(); buf.push(bl);
-            let br_idx = buf.len(); buf.push(br);
-
-            Cell {
-                nw: tl_idx,
-                ne: tr_idx,
-                sw: bl_idx,
-                se: br_idx,
-            }
-        }
-    }
-
-    /// Computes the result of a 2^k cell for k > 4 (i.e. at least 32 cells)
-    #[rustfmt::skip]
-    fn compute_node_res(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
-        // at least 16 cells
-        let mut nw = buf[self.nw];
-        let mut ne = buf[self.ne];
-        let mut sw = buf[self.sw];
-        let mut se = buf[self.se];
-
-        // cardinal pseudo-cells
-        let mut n = cell_utils::h_center(nw, ne);
-        let mut s = cell_utils::h_center(sw, se);
-        let mut e = cell_utils::v_center(ne, se);
-        let mut w = cell_utils::v_center(nw, sw);
-
-        // center n/2 cell of n cell
-        let mut c = cell_utils::center(*self, buf);
-
-        // All of these are cells
-        let n00 = nw.compute_res(next, buf);
-        let n01 =  n.compute_res(next, buf);
-        let n02 = ne.compute_res(next, buf);
-        let n10 =  w.compute_res(next, buf);
-        let n11 =  c.compute_res(next, buf);
-        let n12 =  e.compute_res(next, buf);
-        let n20 = sw.compute_res(next, buf);
-        let n21 =  s.compute_res(next, buf);
-        let n22 = se.compute_res(next, buf);
-
-        // n00 n01 n02
-        // n10 n11 n12
-        // n20 n21 n22
-        let mut tl = Cell::new(n00, n01, n10, n11);
-        let mut tr = Cell::new(n01, n02, n11, n12);
-        let mut bl = Cell::new(n10, n11, n20, n21);
-        let mut br = Cell::new(n11, n12, n21, n22);
-
-        let nw = tl.compute_res(next, buf);
-        let ne = tr.compute_res(next, buf);
-        let sw = bl.compute_res(next, buf);
-        let se = br.compute_res(next, buf);
-
-        Cell {
-            nw,
-            ne,
-            sw,
-            se,
-        }
     }
 
     /// Hash the cell
