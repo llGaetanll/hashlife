@@ -21,6 +21,15 @@ fn resolve_mouse(mouse: MouseEvent) -> Option<Action> {
             col: mouse.column,
             row: mouse.row,
         })),
+        MouseEventKind::Drag(crossterm::event::MouseButton::Left) => {
+            Some(Action::Camera(CameraAction::Drag {
+                col: mouse.column,
+                row: mouse.row,
+            }))
+        }
+        MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
+            Some(Action::Camera(CameraAction::DragEnd))
+        }
         _ => None,
     }
 }

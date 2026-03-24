@@ -49,6 +49,8 @@ fn make_camera(ty: &CameraArg, cols: u16, rows: u16) -> Box<dyn Camera> {
 struct App {
     playing: bool,
     tick: Duration,
+    /// Last drag position for computing deltas, None when not dragging
+    drag_from: Option<(u16, u16)>,
 }
 
 impl App {
@@ -56,6 +58,7 @@ impl App {
         Self {
             playing: false,
             tick: Duration::from_millis(50),
+            drag_from: None,
         }
     }
 }
@@ -140,6 +143,21 @@ fn run(
                     CameraAction::ZoomOut => cam.zoom_out(),
                     CameraAction::ZoomInAt { col, row } => cam.zoom_in_at(col, row),
                     CameraAction::ZoomOutAt { col, row } => cam.zoom_out_at(col, row),
+                    CameraAction::Drag { col, row } => {
+                        if let Some((prev_col, prev_row)) = app.drag_from {
+                            let (ppc_x, ppc_y) = cam.pixels_per_char();
+                            let dx = (col as i32 - prev_col as i32) * ppc_x as i32;
+                            let dy = (row as i32 - prev_row as i32) * ppc_y as i32;
+                            if dx > 0 { cam.move_left(dx as u64); }
+                            if dx < 0 { cam.move_right((-dx) as u64); }
+                            if dy > 0 { cam.move_up(dy as u64); }
+                            if dy < 0 { cam.move_down((-dy) as u64); }
+                        }
+                        app.drag_from = Some((col, row));
+                    }
+                    CameraAction::DragEnd => {
+                        app.drag_from = None;
+                    }
                     CameraAction::ResetView => cam.reset_view(),
                     CameraAction::Resize { cols, rows: r } => {
                         rows = r;

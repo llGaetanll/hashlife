@@ -15,6 +15,8 @@ pub trait Camera {
     fn move_right(&mut self, n: u64);
     fn move_up(&mut self, n: u64);
     fn move_down(&mut self, n: u64);
+    /// How many cell-buffer pixels one terminal character spans: (horizontal, vertical)
+    fn pixels_per_char(&self) -> (u16, u16);
     fn zoom_in(&mut self);
     fn zoom_out(&mut self);
     fn zoom_in_at(&mut self, col: u16, row: u16);
@@ -112,6 +114,10 @@ impl Camera for CameraBraille {
     fn move_down(&mut self, n: u64) {
         let dy = 2i128.pow(self.scale as u32);
         self.y -= dy * n as i128;
+    }
+
+    fn pixels_per_char(&self) -> (u16, u16) {
+        (2, 4)
     }
 
     fn reset_view(&mut self) {
@@ -445,6 +451,10 @@ impl Camera for CameraBlock {
     fn move_down(&mut self, n: u64) {
         let dy = 2i128.pow(self.scale as u32);
         self.y -= dy * n as i128;
+    }
+
+    fn pixels_per_char(&self) -> (u16, u16) {
+        (1, 2)
     }
 
     fn reset_view(&mut self) {
