@@ -17,6 +17,8 @@ pub trait Camera {
     fn move_down(&mut self, n: u64);
     fn zoom_in(&mut self);
     fn zoom_out(&mut self);
+    fn zoom_in_at(&mut self, col: u16, row: u16);
+    fn zoom_out_at(&mut self, col: u16, row: u16);
     fn reset_view(&mut self);
     fn resize(&mut self, w: ScreenSize, h: ScreenSize);
     fn draw(&mut self, world: &World);
@@ -151,21 +153,45 @@ impl Camera for CameraBraille {
     }
 
     fn zoom_in(&mut self) {
+        self.zoom_in_at(self.w / 2, self.h / 2);
+    }
+
+    fn zoom_out(&mut self) {
+        self.zoom_out_at(self.w / 2, self.h / 2);
+    }
+
+    fn zoom_in_at(&mut self, col: u16, row: u16) {
         if self.scale == 0 {
             return;
         }
 
-        self.move_right(self.w as u64 / 2);
-        self.move_down(self.h as u64);
+        // Pixel position of the cursor in the cell buffer
+        // Braille: each terminal char = 2x4 pixels
+        let px = col as WorldOffset * 2;
+        let py = row as WorldOffset * 4;
+
+        // Keep the world point under the cursor fixed:
+        // new_x = old_x - px * 2^(scale-1)
+        let shift = self.scale as u32 - 1;
+        self.x -= px << shift;
+        self.y -= py << shift;
 
         self.scale -= 1;
     }
 
-    fn zoom_out(&mut self) {
-        self.scale += 1;
+    fn zoom_out_at(&mut self, col: u16, row: u16) {
+        // Pixel position of the cursor in the cell buffer
+        // Braille: each terminal char = 2x4 pixels
+        let px = col as WorldOffset * 2;
+        let py = row as WorldOffset * 4;
 
-        self.move_left(self.w as u64 / 2);
-        self.move_up(self.h as u64);
+        // Keep the world point under the cursor fixed:
+        // new_x = old_x + px * 2^scale
+        let shift = self.scale as u32;
+        self.x += px << shift;
+        self.y += py << shift;
+
+        self.scale += 1;
     }
 
     fn reset(&mut self) {
@@ -452,21 +478,41 @@ impl Camera for CameraBlock {
     }
 
     fn zoom_in(&mut self) {
+        self.zoom_in_at(self.w / 2, self.h / 2);
+    }
+
+    fn zoom_out(&mut self) {
+        self.zoom_out_at(self.w / 2, self.h / 2);
+    }
+
+    fn zoom_in_at(&mut self, col: u16, row: u16) {
         if self.scale == 0 {
             return;
         }
 
-        self.move_right(self.w as u64 / 4);
-        self.move_down(self.h as u64 / 2);
+        // Pixel position of the cursor in the cell buffer
+        // Block: each terminal char = 1x2 pixels
+        let px = col as WorldOffset;
+        let py = row as WorldOffset * 2;
+
+        let shift = self.scale as u32 - 1;
+        self.x -= px << shift;
+        self.y -= py << shift;
 
         self.scale -= 1;
     }
 
-    fn zoom_out(&mut self) {
-        self.scale += 1;
+    fn zoom_out_at(&mut self, col: u16, row: u16) {
+        // Pixel position of the cursor in the cell buffer
+        // Block: each terminal char = 1x2 pixels
+        let px = col as WorldOffset;
+        let py = row as WorldOffset * 2;
 
-        self.move_left(self.w as u64 / 4);
-        self.move_up(self.h as u64 / 2);
+        let shift = self.scale as u32;
+        self.x += px << shift;
+        self.y += py << shift;
+
+        self.scale += 1;
     }
 
     fn reset(&mut self) {

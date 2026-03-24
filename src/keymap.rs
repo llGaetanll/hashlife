@@ -1,11 +1,26 @@
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
 use crate::action::{Action, AppAction, CameraAction, WorldAction};
 
 pub fn resolve(event: Event) -> Option<Action> {
     match event {
         Event::Key(key) => resolve_key(key),
+        Event::Mouse(mouse) => resolve_mouse(mouse),
         Event::Resize(cols, rows) => Some(Action::Camera(CameraAction::Resize { cols, rows })),
+        _ => None,
+    }
+}
+
+fn resolve_mouse(mouse: MouseEvent) -> Option<Action> {
+    match mouse.kind {
+        MouseEventKind::ScrollUp => Some(Action::Camera(CameraAction::ZoomInAt {
+            col: mouse.column,
+            row: mouse.row,
+        })),
+        MouseEventKind::ScrollDown => Some(Action::Camera(CameraAction::ZoomOutAt {
+            col: mouse.column,
+            row: mouse.row,
+        })),
         _ => None,
     }
 }

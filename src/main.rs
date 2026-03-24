@@ -55,7 +55,12 @@ fn main() -> anyhow::Result<()> {
 
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
+    execute!(
+        stdout,
+        terminal::EnterAlternateScreen,
+        cursor::Hide,
+        event::EnableMouseCapture,
+    )?;
 
     // Initial draw
     cam.reset();
@@ -64,7 +69,12 @@ fn main() -> anyhow::Result<()> {
 
     let result = run(&mut stdout, cam.as_mut(), &mut world);
 
-    execute!(stdout, terminal::LeaveAlternateScreen, cursor::Show)?;
+    execute!(
+        stdout,
+        event::DisableMouseCapture,
+        terminal::LeaveAlternateScreen,
+        cursor::Show,
+    )?;
     terminal::disable_raw_mode()?;
 
     result
@@ -94,6 +104,8 @@ fn run(
                     CameraAction::MoveRight => cam.move_right(1),
                     CameraAction::ZoomIn => cam.zoom_in(),
                     CameraAction::ZoomOut => cam.zoom_out(),
+                    CameraAction::ZoomInAt { col, row } => cam.zoom_in_at(col, row),
+                    CameraAction::ZoomOutAt { col, row } => cam.zoom_out_at(col, row),
                     CameraAction::ResetView => cam.reset_view(),
                     CameraAction::Resize { cols, rows: r } => {
                         rows = r;

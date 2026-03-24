@@ -15,6 +15,8 @@ pub enum CameraAction {
     MoveRight,
     ZoomIn,
     ZoomOut,
+    ZoomInAt { col: u16, row: u16 },
+    ZoomOutAt { col: u16, row: u16 },
     ResetView,
     Resize { cols: u16, rows: u16 },
 }
