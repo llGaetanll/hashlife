@@ -41,6 +41,21 @@ impl World {
         }
     }
 
+    /// Create a world from pre-built parts (for testing)
+    pub fn from_parts(rule: RuleSet, buf: Vec<Cell>, root: Cell, depth: u8) -> Self {
+        let rules = rule.compute_rules();
+        let root_idx = buf.len();
+        let mut buf = buf;
+        buf.push(root);
+
+        Self {
+            rules,
+            root: root_idx,
+            buf,
+            depth,
+        }
+    }
+
     pub fn from_rle(set: RuleSet, data: RleBuffer) -> Self {
         let mut world = Self::new(set);
 

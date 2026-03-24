@@ -111,8 +111,8 @@ impl Cell {
         }
     }
 
-    /// For a cell of sidelength `2^k`, this returns a cell of sidelength `2^{k - 1}`, the result
-    /// after `2^{k - 2}` iterations
+    /// For a cell of sidelength `2^d`, this returns a cell of sidelength `2^{d - 1}`, the result
+    /// after `2^{d - 2}` iterations
     pub fn next(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
         self.compute_res(next, buf)
     }
@@ -121,6 +121,17 @@ impl Cell {
     /// 1 iteration (only leaves advance time)
     pub fn next_nophase2(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
         self.compute_res_once(next, buf)
+    }
+
+    /// Unified next: advances `2^k` iterations for `0 <= k < d - 1` where `d` is the depth.
+    ///
+    /// - `k = 0`: maximal iteration (2^{d-2} steps), equivalent to `next()`
+    /// - `k = 1`: 1 step, equivalent to `next_nophase2()`
+    /// - `k = 2`: 2 steps
+    /// - `k = 3`: 4 steps
+    /// - etc.
+    pub fn next_k(&mut self, k: u8, d: u8, next: &[u16], buf: &mut Vec<Cell>) -> usize {
+        self.compute_res_k(k, d, next, buf)
     }
 
     pub fn children(&self) -> Option<[usize; 4]> {
@@ -212,6 +223,41 @@ impl Cell {
             n
         } else {
             let cell = self.compute_node_res_once(next, buf);
+
+            let n = buf.len();
+            buf.push(cell);
+
+            n
+        }
+    }
+
+    /// Unified compute_res with `k` and depth `d`.
+    ///
+    /// Phase 2 runs at depth `d` if `k == 0` (maximal) or `d <= k + 2`.
+    fn compute_res_k(&mut self, k: u8, d: u8, next: &[u16], buf: &mut Vec<Cell>) -> usize {
+        let do_phase2 = k == 0 || d <= k + 2;
+
+        if self.is_void() {
+            0
+        } else if self.is_leaf() {
+            self.compute_leaf_res(next) as usize
+        } else if self.is_16(buf) {
+            let cell = if do_phase2 {
+                self.compute_node_res16(next, buf)
+            } else {
+                self.compute_node_res16_once(next, buf)
+            };
+
+            let n = buf.len();
+            buf.push(cell);
+
+            n
+        } else {
+            let cell = if do_phase2 {
+                self.compute_node_res_k(k, d, next, buf)
+            } else {
+                self.compute_node_res_once_k(k, d, next, buf)
+            };
 
             let n = buf.len();
             buf.push(cell);
@@ -336,6 +382,130 @@ impl Cell {
             }
         } else {
             // Results are nodes — extract center normally
+            let center4 = |a, b, c, d| -> Cell {
+                cell_utils::center(Cell::new(a, b, c, d), buf)
+            };
+
+            let tl = center4(n00, n01, n10, n11);
+            let tr = center4(n01, n02, n11, n12);
+            let bl = center4(n10, n11, n20, n21);
+            let br = center4(n11, n12, n21, n22);
+
+            let tl_idx = buf.len(); buf.push(tl);
+            let tr_idx = buf.len(); buf.push(tr);
+            let bl_idx = buf.len(); buf.push(bl);
+            let br_idx = buf.len(); buf.push(br);
+
+            Cell {
+                nw: tl_idx,
+                ne: tr_idx,
+                sw: bl_idx,
+                se: br_idx,
+            }
+        }
+    }
+
+    /// Phase 2 variant: runs phase 1 with `compute_res_k` (so children decide based on depth),
+    /// then runs phase 2 with full `compute_res` (phase 2 always runs full once committed).
+    #[rustfmt::skip]
+    fn compute_node_res_k(&mut self, k: u8, d: u8, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
+        let mut nw = buf[self.nw];
+        let mut ne = buf[self.ne];
+        let mut sw = buf[self.sw];
+        let mut se = buf[self.se];
+
+        let mut n = cell_utils::h_center(nw, ne);
+        let mut s = cell_utils::h_center(sw, se);
+        let mut e = cell_utils::v_center(ne, se);
+        let mut w = cell_utils::v_center(nw, sw);
+        let mut c = cell_utils::center(*self, buf);
+
+        let d1 = d - 1;
+        let n00 = nw.compute_res_k(k, d1, next, buf);
+        let n01 =  n.compute_res_k(k, d1, next, buf);
+        let n02 = ne.compute_res_k(k, d1, next, buf);
+        let n10 =  w.compute_res_k(k, d1, next, buf);
+        let n11 =  c.compute_res_k(k, d1, next, buf);
+        let n12 =  e.compute_res_k(k, d1, next, buf);
+        let n20 = sw.compute_res_k(k, d1, next, buf);
+        let n21 =  s.compute_res_k(k, d1, next, buf);
+        let n22 = se.compute_res_k(k, d1, next, buf);
+
+        let mut tl = Cell::new(n00, n01, n10, n11);
+        let mut tr = Cell::new(n01, n02, n11, n12);
+        let mut bl = Cell::new(n10, n11, n20, n21);
+        let mut br = Cell::new(n11, n12, n21, n22);
+
+        let nw = tl.compute_res(next, buf);
+        let ne = tr.compute_res(next, buf);
+        let sw = bl.compute_res(next, buf);
+        let se = br.compute_res(next, buf);
+
+        Cell {
+            nw,
+            ne,
+            sw,
+            se,
+        }
+    }
+
+    /// No-phase-2 variant: runs phase 1 with `compute_res_k`, then extracts centers.
+    #[rustfmt::skip]
+    fn compute_node_res_once_k(&mut self, k: u8, d: u8, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
+        let results_are_leaves = buf[self.nw].is_16(buf)
+            || buf[self.ne].is_16(buf)
+            || buf[self.sw].is_16(buf)
+            || buf[self.se].is_16(buf);
+
+        let mut nw = buf[self.nw];
+        let mut ne = buf[self.ne];
+        let mut sw = buf[self.sw];
+        let mut se = buf[self.se];
+
+        let mut n = cell_utils::h_center(nw, ne);
+        let mut s = cell_utils::h_center(sw, se);
+        let mut e = cell_utils::v_center(ne, se);
+        let mut w = cell_utils::v_center(nw, sw);
+        let mut c = cell_utils::center(*self, buf);
+
+        let d1 = d - 1;
+        let n00 = nw.compute_res_k(k, d1, next, buf);
+        let n01 =  n.compute_res_k(k, d1, next, buf);
+        let n02 = ne.compute_res_k(k, d1, next, buf);
+        let n10 =  w.compute_res_k(k, d1, next, buf);
+        let n11 =  c.compute_res_k(k, d1, next, buf);
+        let n12 =  e.compute_res_k(k, d1, next, buf);
+        let n20 = sw.compute_res_k(k, d1, next, buf);
+        let n21 =  s.compute_res_k(k, d1, next, buf);
+        let n22 = se.compute_res_k(k, d1, next, buf);
+
+        // Skip phase 2: extract centers
+        if results_are_leaves {
+            let center_leaf = |a: usize, b: usize, c: usize, d: usize| -> Cell {
+                let nw = buf[a].se as u16;
+                let ne = buf[b].sw as u16;
+                let sw = buf[c].ne as u16;
+                let se = (buf[d].nw & !LEAF_MASK) as u16;
+                Cell::leaf(nw, ne, sw, se)
+            };
+
+            let tl = center_leaf(n00, n01, n10, n11);
+            let tr = center_leaf(n01, n02, n11, n12);
+            let bl = center_leaf(n10, n11, n20, n21);
+            let br = center_leaf(n11, n12, n21, n22);
+
+            let tl_idx = buf.len(); buf.push(tl);
+            let tr_idx = buf.len(); buf.push(tr);
+            let bl_idx = buf.len(); buf.push(bl);
+            let br_idx = buf.len(); buf.push(br);
+
+            Cell {
+                nw: tl_idx,
+                ne: tr_idx,
+                sw: bl_idx,
+                se: br_idx,
+            }
+        } else {
             let center4 = |a, b, c, d| -> Cell {
                 cell_utils::center(Cell::new(a, b, c, d), buf)
             };
@@ -945,6 +1115,132 @@ mod test_next {
             nw_leaf, expected_nw,
             "\nExpected nw: {:?}\n     Got nw: {:?}",
             expected_nw, nw_leaf
+        );
+    }
+
+    /// Helper: build a 32-cell with a glider near the center.
+    /// Returns (cell32, buf).
+    #[rustfmt::skip]
+    fn make_glider_32() -> (Cell, Vec<Cell>) {
+        let mut buf = vec![Cell::void()];
+        let empty_leaf = Cell::leaf(0, 0, 0, 0);
+        let glider_leaf = Cell::leaf(0, 0, 0, 0b0010_0001_0111_0000);
+
+        let e1 = buf.len(); buf.push(empty_leaf);
+        let e2 = buf.len(); buf.push(empty_leaf);
+        let e3 = buf.len(); buf.push(empty_leaf);
+        let gl = buf.len(); buf.push(glider_leaf);
+        let nw16 = Cell::new(e1, e2, e3, gl);
+        let nw16_idx = buf.len(); buf.push(nw16);
+
+        let e4 = buf.len(); buf.push(empty_leaf);
+        let e5 = buf.len(); buf.push(empty_leaf);
+        let e6 = buf.len(); buf.push(empty_leaf);
+        let e7 = buf.len(); buf.push(empty_leaf);
+        let empty16 = Cell::new(e4, e5, e6, e7);
+        let ne16_idx = buf.len(); buf.push(empty16);
+        let sw16_idx = buf.len(); buf.push(empty16);
+        let se16_idx = buf.len(); buf.push(empty16);
+
+        let cell32 = Cell::new(nw16_idx, ne16_idx, sw16_idx, se16_idx);
+        (cell32, buf)
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_next_k0_matches_next() {
+        let rules = B3S23.compute_rules();
+
+        let (mut cell, mut buf1) = make_glider_32();
+        let (mut cell2, mut buf2) = make_glider_32();
+
+        let k0_idx = cell.next_k(0, 5, &rules, &mut buf1);
+        let full_idx = cell2.next(&rules, &mut buf2);
+
+        let k0_result = buf1[k0_idx];
+        let full_result = buf2[full_idx];
+
+        // k=0 should produce the same result as next() (maximal)
+        assert_eq!(
+            k0_result, full_result,
+            "\nnext_k(0): {:?}\n    next(): {:?}",
+            k0_result, full_result
+        );
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_next_k1_matches_nophase2() {
+        let rules = B3S23.compute_rules();
+
+        let (mut cell, mut buf1) = make_glider_32();
+        let (mut cell2, mut buf2) = make_glider_32();
+
+        let k1_idx = cell.next_k(1, 5, &rules, &mut buf1);
+        let once_idx = cell2.next_nophase2(&rules, &mut buf2);
+
+        // Both should be 16-cells; compare their children (leaves)
+        let k1 = buf1[k1_idx];
+        let once = buf2[once_idx];
+
+        for (q_name, k1_q, once_q) in [
+            ("nw", k1.nw, once.nw),
+            ("ne", k1.ne, once.ne),
+            ("sw", k1.sw, once.sw),
+            ("se", k1.se, once.se),
+        ] {
+            assert_eq!(
+                buf1[k1_q], buf2[once_q],
+                "\n{} mismatch:\n  next_k(1): {:?}\n  nophase2:  {:?}",
+                q_name, buf1[k1_q], buf2[once_q]
+            );
+        }
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_next_k2_is_2_steps() {
+        let rules = B3S23.compute_rules();
+
+        // Run next_k(2, 5) on a 32-cell: should advance 2 steps
+        let (mut cell, mut buf_k) = make_glider_32();
+        let k2_idx = cell.next_k(2, 5, &rules, &mut buf_k);
+
+        // Run next_k(1, 5) on a 32-cell: should advance 1 step, yielding a 16-cell
+        // Then grow it back to a 32-cell and run next_k(1, 5) again
+        let (mut cell2, mut buf2) = make_glider_32();
+        let step1_idx = cell2.next_k(1, 5, &rules, &mut buf2);
+        let step1_cell = buf2[step1_idx];
+        // Grow the 16-cell result back to a 32-cell
+        let step1_grown = step1_cell.grow(&mut buf2);
+        let step1_grown_idx = buf2.len();
+        buf2.push(step1_grown);
+        let mut step1_grown_cell = buf2[step1_grown_idx];
+        let step2_idx = step1_grown_cell.next_k(1, 5, &rules, &mut buf2);
+
+        // Both results are 16-cells. Render and compare.
+        use crate::camera::CameraBlock;
+
+        let k2_result = buf_k[k2_idx];
+        let step2_result = buf2[step2_idx];
+
+        let mut cam_k = CameraBlock::new(16, 8);
+        draw_cell(&mut cam_k, k2_result, &buf_k, 1, 0, 0);
+        cam_k.invert();
+
+        let mut cam_2 = CameraBlock::new(16, 8);
+        draw_cell(&mut cam_2, step2_result, &buf2, 1, 0, 0);
+        cam_2.invert();
+
+        let k2_render = cam_k.render();
+        let step2_render = cam_2.render();
+
+        eprintln!("next_k(2) result (16x16, 2 steps):\n{}", k2_render);
+        eprintln!("2x next_k(1) result (16x16, 2 steps):\n{}", step2_render);
+
+        assert_eq!(
+            k2_render, step2_render,
+            "\nnext_k(2) and 2x next_k(1) should produce the same pattern"
         );
     }
 }
