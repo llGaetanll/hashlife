@@ -35,6 +35,9 @@ pub const RES_UNSET_MASK: usize = LEAF_MASK;
 /// Sentinel value for "end of hash chain" — can never be a valid buf index
 pub const HASH_CHAIN_END: usize = usize::MAX;
 
+/// Sentinel for "cell reset by GC but not yet visited/reinserted"
+pub const GC_UNREACHABLE: usize = usize::MAX - 1;
+
 /// A `CellHash` is either an index into a list of `Cell`s, or 4 cell stored directly as a u16
 pub type CellHash = usize;
 
@@ -625,7 +628,6 @@ mod test_next {
     fn make_glider_64() -> World {
         let w32 = make_glider_32();
         let mut buf = w32.buf;
-        let cell32 = buf[w32.root];
 
         // Wrap: glider is in the SE of the 32-cell's NW 16-cell,
         // so place the 32-cell in the NW quadrant of the 64-cell

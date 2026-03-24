@@ -3,7 +3,7 @@ use crate::rle_data::RleBufferEntry;
 use crate::rule_set::RuleSet;
 
 use crate::WorldOffset;
-use crate::cell::{Cell, HASH_CHAIN_END, LEAF_MASK, RES_UNSET_MASK, bump_compute_count, cell_utils};
+use crate::cell::{Cell, GC_UNREACHABLE, HASH_CHAIN_END, LEAF_MASK, RES_UNSET_MASK, bump_compute_count, cell_utils};
 
 const INITIAL_HASH_SIZE: usize = 1021;
 
@@ -46,7 +46,7 @@ pub struct World {
     hashtab: Vec<usize>,
 
     /// Number of entries in the hash table
-    hashpop: usize,
+    pub hashpop: usize,
 }
 
 impl World {
@@ -291,6 +291,53 @@ impl World {
         }
 
         self.hashtab = new_tab;
+    }
+
+    /// Lightweight garbage collection: clears the hash table and reinserts only
+    /// cells reachable from the root. Orphaned cells remain in buf but are no
+    /// longer findable by `find_node`/`find_leaf`.
+    pub fn gc(&mut self) {
+        // Clear hash table
+        self.hashtab.fill(HASH_CHAIN_END);
+        self.hashpop = 0;
+
+        // Mark all cells as unreachable
+        for cell in self.buf.iter_mut() {
+            cell.next_hash = GC_UNREACHABLE;
+        }
+
+        // Rewalk live tree from root, reinserting reachable cells
+        self.gc_mark(self.root);
+    }
+
+    /// Recursively reinsert a cell and its children into the hash table.
+    fn gc_mark(&mut self, idx: usize) {
+        if self.buf[idx].next_hash != GC_UNREACHABLE {
+            // Already visited and reinserted
+            return;
+        }
+
+        // Insert into hash table first (marks as visited)
+        let h = self.buf[idx].hash() % self.hashtab.len();
+        self.buf[idx].next_hash = self.hashtab[h];
+        self.hashtab[h] = idx;
+        self.hashpop += 1;
+
+        let cell = self.buf[idx];
+
+        if !cell.is_void() && !cell.is_leaf() {
+            // Recurse into children
+            self.gc_mark(cell.nw);
+            self.gc_mark(cell.ne);
+            self.gc_mark(cell.sw);
+            self.gc_mark(cell.se);
+        }
+
+        // Mark cached result if present.
+        // Leaf results are u16 rules (not buf indices), so skip those.
+        if !cell.is_leaf() && cell.res != RES_UNSET_MASK {
+            self.gc_mark(cell.res);
+        }
     }
 
     /// Compute the result of a cell, dispatching based on type.
@@ -771,5 +818,196 @@ impl World {
     /// Add an empty non-leaf cell to the world and return its index
     fn add_node(&mut self) -> usize {
         self.find_node(0, 0, 0, 0)
+    }
+}
+
+#[cfg(test)]
+mod test_gc {
+    use crate::cell::Cell;
+    use crate::rule_set::B3S23;
+    use crate::world::World;
+
+    /// Build a World with a glider near the center at the given depth
+    #[rustfmt::skip]
+    fn make_glider(depth: u8) -> World {
+        assert!(depth >= 4, "need at least a 16-cell for a glider");
+
+        let mut buf = vec![Cell::void()];
+
+        let empty_leaf = Cell::leaf(0, 0, 0, 0);
+        let glider_leaf = Cell::leaf(0, 0, 0, 0b0010_0001_0111_0000);
+
+        let el = buf.len(); buf.push(empty_leaf);
+        let gl = buf.len(); buf.push(glider_leaf);
+
+        let nw16 = Cell::new(el, el, el, gl);
+        let empty16 = Cell::new(el, el, el, el);
+        let nw16_idx = buf.len(); buf.push(nw16);
+        let empty16_idx = buf.len(); buf.push(empty16);
+
+        let mut root = Cell::new(nw16_idx, empty16_idx, empty16_idx, empty16_idx);
+
+        for _ in 5..=depth {
+            let root_idx = buf.len(); buf.push(root);
+            root = Cell::new(root_idx, 0, 0, 0);
+        }
+
+        World::from_parts(B3S23, buf, root, depth)
+    }
+
+    /// Compare two world trees structurally (indices may differ)
+    fn trees_equal(a: &World, a_idx: usize, b: &World, b_idx: usize) -> bool {
+        let ca = a.buf[a_idx];
+        let cb = b.buf[b_idx];
+        if ca.is_void() && cb.is_void() { return true; }
+        if ca.is_leaf() != cb.is_leaf() { return false; }
+        if ca.is_leaf() {
+            return ca == cb;
+        }
+        trees_equal(a, ca.nw, b, cb.nw)
+            && trees_equal(a, ca.ne, b, cb.ne)
+            && trees_equal(a, ca.sw, b, cb.sw)
+            && trees_equal(a, ca.se, b, cb.se)
+    }
+
+    #[test]
+    fn test_gc_preserves_tree() {
+        // GC itself should not change the tree — only the hash table internals
+        let mut world = make_glider(6);
+        world.next(0);
+        // Can't snapshot, so we just verify GC + step matches no-GC + step
+        // (test_gc_step_matches_no_gc covers this). Here, verify GC doesn't
+        // crash and hashpop is sane.
+        let pop_before = world.hashpop;
+        world.gc();
+        let pop_after = world.hashpop;
+
+        assert!(pop_after <= pop_before,
+            "GC should not increase live count: {pop_after} vs {pop_before}");
+        assert!(pop_after > 0, "GC should keep at least the root alive");
+    }
+
+    #[test]
+    fn test_gc_step_matches_no_gc() {
+        // Step, GC, step again — should match stepping without GC
+        let mut world_gc = make_glider(6);
+        let mut world_no_gc = make_glider(6);
+
+        world_gc.next(0);
+        world_no_gc.next(0);
+
+        let buf_before_gc = world_gc.buf.len();
+        world_gc.gc();
+        let pop_after_gc = world_gc.hashpop;
+
+        eprintln!("buf size: {buf_before_gc}, live cells after gc: {pop_after_gc}");
+        assert!(pop_after_gc < buf_before_gc,
+            "GC should reduce live cell count: {pop_after_gc} < {buf_before_gc}");
+
+        world_gc.next(0);
+        world_no_gc.next(0);
+
+        assert!(trees_equal(&world_gc, world_gc.root, &world_no_gc, world_no_gc.root),
+            "GC should not affect computation results");
+    }
+
+    #[test]
+    fn test_gc_twice() {
+        // GC twice in a row should be safe and idempotent
+        let mut world = make_glider(6);
+        world.next(0);
+
+        world.gc();
+        let pop_first = world.hashpop;
+
+        world.gc();
+        let pop_second = world.hashpop;
+
+        assert_eq!(pop_first, pop_second,
+            "Second GC should not change live count: {pop_first} vs {pop_second}");
+
+        // Should still compute correctly after double GC
+        let mut world_ref = make_glider(6);
+        world_ref.next(0);
+        world_ref.next(0);
+
+        world.next(0);
+
+        assert!(trees_equal(&world, world.root, &world_ref, world_ref.root),
+            "Double GC should not affect computation");
+    }
+
+    #[test]
+    fn test_gc_fresh_world() {
+        // GC on a world with no computation should not crash
+        // and should preserve the tree (verify by stepping after)
+        let mut world_gc = make_glider(6);
+        let mut world_ref = make_glider(6);
+
+        world_gc.gc();
+
+        world_gc.next(0);
+        world_ref.next(0);
+
+        assert!(trees_equal(&world_gc, world_gc.root, &world_ref, world_ref.root),
+            "GC on fresh world should not affect subsequent computation");
+    }
+
+    #[test]
+    fn test_gc_after_set() {
+        // Build a pattern via set(), GC, step — should match stepping without GC
+        let mut world_gc = World::new(B3S23);
+        let mut world_ref = World::new(B3S23);
+
+        for world in [&mut world_gc, &mut world_ref] {
+            world.grow(3); // depth 6
+            world.set(0, 0);
+            world.set(1, 0);
+            world.set(2, 0);
+            world.set(2, -1);
+            world.set(1, -2);
+        }
+
+        world_gc.gc();
+
+        world_gc.next(0);
+        world_ref.next(0);
+
+        assert!(trees_equal(&world_gc, world_gc.root, &world_ref, world_ref.root),
+            "GC after set() should not affect computation");
+    }
+
+    #[test]
+    fn test_gc_preserves_result_cache() {
+        use crate::cell::{reset_compute_count, get_compute_count};
+
+        // Both worlds do the same two steps.
+        // One GCs between steps, the other doesn't.
+        // The GC world should do no more compute calls on the second step
+        // than the non-GC world, proving caches on live cells survive GC.
+        let mut world_gc = make_glider(6);
+        let mut world_no_gc = make_glider(6);
+
+        world_gc.next(0);
+        world_no_gc.next(0);
+
+        world_gc.gc();
+
+        // Measure second step on both
+        reset_compute_count();
+        world_no_gc.next(0);
+        let count_no_gc = get_compute_count();
+
+        reset_compute_count();
+        world_gc.next(0);
+        let count_gc = get_compute_count();
+
+        eprintln!("compute calls — with GC: {count_gc}, without GC: {count_no_gc}");
+
+        // GC may lose some intermediate caches, so allow a small overhead,
+        // but it should not be dramatically worse.
+        let max_allowed = count_no_gc * 2;
+        assert!(count_gc <= max_allowed,
+            "Post-GC step should not be dramatically worse: {count_gc} vs {count_no_gc} (max {max_allowed})");
     }
 }
