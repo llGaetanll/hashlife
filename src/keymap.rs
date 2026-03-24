@@ -1,0 +1,69 @@
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+use crate::action::{Action, AppAction, CameraAction, WorldAction};
+
+pub fn resolve(event: Event) -> Option<Action> {
+    match event {
+        Event::Key(key) => resolve_key(key),
+        Event::Resize(cols, rows) => Some(Action::Camera(CameraAction::Resize { cols, rows })),
+        _ => None,
+    }
+}
+
+fn resolve_key(key: KeyEvent) -> Option<Action> {
+    match key {
+        KeyEvent {
+            code: KeyCode::Char('q'),
+            ..
+        }
+        | KeyEvent {
+            code: KeyCode::Char('c'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        } => Some(Action::App(AppAction::Quit)),
+
+        KeyEvent {
+            code: KeyCode::Char('K'),
+            modifiers: KeyModifiers::SHIFT,
+            ..
+        } => Some(Action::Camera(CameraAction::ZoomIn)),
+
+        KeyEvent {
+            code: KeyCode::Char('J'),
+            modifiers: KeyModifiers::SHIFT,
+            ..
+        } => Some(Action::Camera(CameraAction::ZoomOut)),
+
+        KeyEvent {
+            code: KeyCode::Char('h'),
+            ..
+        } => Some(Action::Camera(CameraAction::MoveLeft)),
+
+        KeyEvent {
+            code: KeyCode::Char('j'),
+            ..
+        } => Some(Action::Camera(CameraAction::MoveDown)),
+
+        KeyEvent {
+            code: KeyCode::Char('k'),
+            ..
+        } => Some(Action::Camera(CameraAction::MoveUp)),
+
+        KeyEvent {
+            code: KeyCode::Char('l'),
+            ..
+        } => Some(Action::Camera(CameraAction::MoveRight)),
+
+        KeyEvent {
+            code: KeyCode::Char('0'),
+            ..
+        } => Some(Action::Camera(CameraAction::ResetView)),
+
+        KeyEvent {
+            code: KeyCode::Char(' '),
+            ..
+        } => Some(Action::World(WorldAction::Step)),
+
+        _ => None,
+    }
+}
