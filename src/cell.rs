@@ -111,26 +111,11 @@ impl Cell {
         }
     }
 
-    /// For a cell of sidelength `2^d`, this returns a cell of sidelength `2^{d - 1}`, the result
-    /// after `2^{d - 2}` iterations
-    pub fn next(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
-        self.compute_full(next, buf)
-    }
-
-    /// Like `next` but skips phase 2 on all non-leaf levels, resulting in only
-    /// 1 iteration (only leaves advance time)
-    pub fn next_half(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
-        self.compute_half(next, buf)
-    }
-
-    /// Unified next: advances `2^k` iterations for `0 <= k < d - 1` where `d` is the depth.
+    /// Advance the cell by `2^(k-1)` iterations (k=1 is 1 step, k=2 is 2, k=3 is 4, ...).
+    /// k=0 is maximal: `2^(d-3)` steps for a cell of depth `d`.
     ///
-    /// - `k = 0`: maximal iteration (2^{d-2} steps), equivalent to `next()`
-    /// - `k = 1`: 1 step, equivalent to `next_half()`
-    /// - `k = 2`: 2 steps
-    /// - `k = 3`: 4 steps
-    /// - etc.
-    pub fn next_k(&mut self, k: u8, d: u8, next: &[u16], buf: &mut Vec<Cell>) -> usize {
+    /// `d` is the depth of this cell (3 = leaf, 4 = 16-cell, etc.)
+    pub fn next(&mut self, k: u8, d: u8, next: &[u16], buf: &mut Vec<Cell>) -> usize {
         self.compute_k(k, d, next, buf)
     }
 
@@ -208,30 +193,7 @@ impl Cell {
         }
     }
 
-    /// Like compute_full but skips phase 2 at all non-leaf levels.
-    fn compute_half(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
-        if self.is_void() {
-            0
-        } else if self.is_leaf() {
-            self.compute_leaf(next) as usize
-        } else if self.is_16(buf) {
-            let cell = self.compute_node16_half(next, buf);
-
-            let n = buf.len();
-            buf.push(cell);
-
-            n
-        } else {
-            let cell = self.compute_node_half(next, buf);
-
-            let n = buf.len();
-            buf.push(cell);
-
-            n
-        }
-    }
-
-    /// Unified compute_full with `k` and depth `d`.
+    /// Unified compute with `k` and depth `d`.
     ///
     /// Phase 2 runs at depth `d` if `k == 0` (maximal) or `d <= k + 2`.
     fn compute_k(&mut self, k: u8, d: u8, next: &[u16], buf: &mut Vec<Cell>) -> usize {
@@ -313,95 +275,6 @@ impl Cell {
             ne,
             sw,
             se,
-        }
-    }
-
-    /// Like compute_node_full but skips phase 2 at all levels.
-    /// Leaves still compute, but instead of building tl/tr/bl/br and recursing again, we extract
-    /// centers from the 9 results.
-    #[rustfmt::skip]
-    fn compute_node_half(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> Cell {
-        // Determine result level from input structure before computing.
-        // If self's children are 16-cells, phase 1 results will be leaves (or void).
-        // Otherwise they'll be nodes (or void).
-        let results_are_leaves = buf[self.nw].is_16(buf)
-            || buf[self.ne].is_16(buf)
-            || buf[self.sw].is_16(buf)
-            || buf[self.se].is_16(buf);
-
-        let mut nw = buf[self.nw];
-        let mut ne = buf[self.ne];
-        let mut sw = buf[self.sw];
-        let mut se = buf[self.se];
-
-        let mut n = cell_utils::h_center(nw, ne);
-        let mut s = cell_utils::h_center(sw, se);
-        let mut e = cell_utils::v_center(ne, se);
-        let mut w = cell_utils::v_center(nw, sw);
-        let mut c = cell_utils::center(*self, buf);
-
-        // Phase 1 using half (no doubling) recursion
-        let n00 = nw.compute_half(next, buf);
-        let n01 =  n.compute_half(next, buf);
-        let n02 = ne.compute_half(next, buf);
-        let n10 =  w.compute_half(next, buf);
-        let n11 =  c.compute_half(next, buf);
-        let n12 =  e.compute_half(next, buf);
-        let n20 = sw.compute_half(next, buf);
-        let n21 =  s.compute_half(next, buf);
-        let n22 = se.compute_half(next, buf);
-
-        // Skip phase 2: extract center of each would-be quadrant.
-        // If results are leaves (depth 5 case), use center16-style leaf extraction.
-        // Otherwise use center-style node extraction.
-        if results_are_leaves {
-            // Results are leaves — extract center as a leaf (like center16)
-            let center_leaf = |a: usize, b: usize, c: usize, d: usize| -> Cell {
-                let nw = buf[a].se as u16;
-                let ne = buf[b].sw as u16;
-                let sw = buf[c].ne as u16;
-                let se = (buf[d].nw & !LEAF_MASK) as u16;
-                Cell::leaf(nw, ne, sw, se)
-            };
-
-            let tl = center_leaf(n00, n01, n10, n11);
-            let tr = center_leaf(n01, n02, n11, n12);
-            let bl = center_leaf(n10, n11, n20, n21);
-            let br = center_leaf(n11, n12, n21, n22);
-
-            let tl_idx = buf.len(); buf.push(tl);
-            let tr_idx = buf.len(); buf.push(tr);
-            let bl_idx = buf.len(); buf.push(bl);
-            let br_idx = buf.len(); buf.push(br);
-
-            Cell {
-                nw: tl_idx,
-                ne: tr_idx,
-                sw: bl_idx,
-                se: br_idx,
-            }
-        } else {
-            // Results are nodes — extract center normally
-            let center4 = |a, b, c, d| -> Cell {
-                cell_utils::center(Cell::new(a, b, c, d), buf)
-            };
-
-            let tl = center4(n00, n01, n10, n11);
-            let tr = center4(n01, n02, n11, n12);
-            let bl = center4(n10, n11, n20, n21);
-            let br = center4(n11, n12, n21, n22);
-
-            let tl_idx = buf.len(); buf.push(tl);
-            let tr_idx = buf.len(); buf.push(tr);
-            let bl_idx = buf.len(); buf.push(bl);
-            let br_idx = buf.len(); buf.push(br);
-
-            Cell {
-                nw: tl_idx,
-                ne: tr_idx,
-                sw: bl_idx,
-                se: br_idx,
-            }
         }
     }
 
@@ -964,7 +837,7 @@ mod test_next {
 
         let mut cell16 = Cell::new(nw_idx, ne_idx, sw_idx, se_idx);
 
-        let result_idx = cell16.next(&rules, &mut buf);
+        let result_idx = cell16.next(0, 4, &rules, &mut buf);
         let result = buf[result_idx];
 
         let expected = Cell::leaf(0b0000_0001_0101_0011, 0, 0, 0);
@@ -1003,11 +876,11 @@ mod test_next {
         let sw_idx = buf2.len(); buf2.push(Cell::leaf(0, 0, 0, 0));
         let se_idx = buf2.len(); buf2.push(Cell::leaf(0, 0, 0, 0));
         let mut cell16_full = Cell::new(nw_idx, ne_idx, sw_idx, se_idx);
-        let full_idx = cell16_full.next(&rules, &mut buf2);
+        let full_idx = cell16_full.next(0, 4, &rules, &mut buf2);
         let full_result = buf2[full_idx];
 
         // half should advance only 1 iteration instead of 2
-        let result_idx = cell16.next_half(&rules, &mut buf);
+        let result_idx = cell16.next(1, 4, &rules, &mut buf);
         let result = buf[result_idx];
 
         // Visualize input, half result, and full result
@@ -1088,11 +961,11 @@ mod test_next {
         // Also run full next() for comparison
         let mut buf2 = buf.clone();
         let mut cell32_full = cell32;
-        let full_idx = cell32_full.next(&rules, &mut buf2);
+        let full_idx = cell32_full.next(0, 5, &rules, &mut buf2);
         let full_result = buf2[full_idx];
 
         // half should advance only 1 iteration
-        let result_idx = cell32.next_half(&rules, &mut buf);
+        let result_idx = cell32.next(1, 5, &rules, &mut buf);
         let result = buf[result_idx];
 
         let mut cam = CameraBlock::new(16, 8);
@@ -1116,20 +989,6 @@ mod test_next {
             "\nExpected nw: {:?}\n     Got nw: {:?}",
             expected_nw, nw_leaf
         );
-    }
-
-    #[rustfmt::skip]
-    fn make_glider_16() -> (Cell, Vec<Cell>) {
-        let mut buf = vec![Cell::void()];
-        let nw_leaf = Cell::leaf(0, 0, 0, 0b0010_0001_0111_0000);
-        let empty_leaf = Cell::leaf(0, 0, 0, 0);
-
-        let nw = buf.len(); buf.push(nw_leaf);
-        let ne = buf.len(); buf.push(empty_leaf);
-        let sw = buf.len(); buf.push(empty_leaf);
-        let se = buf.len(); buf.push(empty_leaf);
-
-        (Cell::new(nw, ne, sw, se), buf)
     }
 
     /// Helper: build a 32-cell with a glider near the center.
@@ -1180,7 +1039,7 @@ mod test_next {
         let mut root = cell;
         let mut d = depth;
         for _ in 0..n {
-            let idx = root.next_k(1, d, rules, buf);
+            let idx = root.next(1, d, rules, buf);
             d -= 1;
             // Grow back to original depth
             let result = buf[idx];
@@ -1195,7 +1054,7 @@ mod test_next {
         let mut root2 = cell;
         let mut d2 = depth;
         for i in 0..n {
-            let idx = root2.next_k(1, d2, rules, buf);
+            let idx = root2.next(1, d2, rules, buf);
             d2 -= 1;
             if i < n - 1 {
                 let result = buf[idx];
@@ -1213,80 +1072,12 @@ mod test_next {
 
     #[test]
     #[rustfmt::skip]
-    fn test_next_k_16cell_k0_matches_next() {
-        let rules = B3S23.compute_rules();
-
-        let (mut c1, mut b1) = make_glider_16();
-        let (mut c2, mut b2) = make_glider_16();
-
-        let k0 = c1.next_k(0, 4, &rules, &mut b1);
-        let full = c2.next(&rules, &mut b2);
-
-        assert_eq!(b1[k0], b2[full],
-            "\n16-cell: next_k(0) != next()\n  k0:   {:?}\n  full: {:?}", b1[k0], b2[full]);
-    }
-
-    #[test]
-    #[rustfmt::skip]
-    fn test_next_k_16cell_k1_matches_half() {
-        let rules = B3S23.compute_rules();
-
-        let (mut c1, mut b1) = make_glider_16();
-        let (mut c2, mut b2) = make_glider_16();
-
-        let k1 = c1.next_k(1, 4, &rules, &mut b1);
-        let once = c2.next_half(&rules, &mut b2);
-
-        assert_eq!(b1[k1], b2[once],
-            "\n16-cell: next_k(1) != next_half()\n  k1:   {:?}\n  once: {:?}", b1[k1], b2[once]);
-    }
-
-    #[test]
-    #[rustfmt::skip]
-    fn test_next_k_32cell_k0_matches_next() {
-        let rules = B3S23.compute_rules();
-
-        let (mut c1, mut b1) = make_glider_32();
-        let (mut c2, mut b2) = make_glider_32();
-
-        let k0 = c1.next_k(0, 5, &rules, &mut b1);
-        let full = c2.next(&rules, &mut b2);
-
-        assert_eq!(b1[k0], b2[full],
-            "\n32-cell: next_k(0) != next()\n  k0:   {:?}\n  full: {:?}", b1[k0], b2[full]);
-    }
-
-    #[test]
-    #[rustfmt::skip]
-    fn test_next_k_32cell_k1_matches_half() {
-        let rules = B3S23.compute_rules();
-
-        let (mut c1, mut b1) = make_glider_32();
-        let (mut c2, mut b2) = make_glider_32();
-
-        let k1_idx = c1.next_k(1, 5, &rules, &mut b1);
-        let once_idx = c2.next_half(&rules, &mut b2);
-
-        let k1 = b1[k1_idx];
-        let once = b2[once_idx];
-
-        // Compare children (both are 16-cells)
-        for (name, a, b) in [("nw", k1.nw, once.nw), ("ne", k1.ne, once.ne),
-                              ("sw", k1.sw, once.sw), ("se", k1.se, once.se)] {
-            assert_eq!(b1[a], b2[b],
-                "\n32-cell {}: next_k(1) != next_half()\n  k1:   {:?}\n  once: {:?}",
-                name, b1[a], b2[b]);
-        }
-    }
-
-    #[test]
-    #[rustfmt::skip]
     fn test_next_k_32cell_k2_is_2_steps() {
         let rules = B3S23.compute_rules();
 
         // next_k(2, 5) should give 2 steps
         let (mut cell, mut buf_k) = make_glider_32();
-        let k2_idx = cell.next_k(2, 5, &rules, &mut buf_k);
+        let k2_idx = cell.next(2, 5, &rules, &mut buf_k);
         let k2_render = render_cell(buf_k[k2_idx], &buf_k, 4);
 
         // 2x single steps for ground truth
@@ -1311,8 +1102,8 @@ mod test_next {
         let (mut c1, mut b1) = make_glider_32();
         let (mut c2, mut b2) = make_glider_32();
 
-        let k3 = c1.next_k(3, 5, &rules, &mut b1);
-        let k0 = c2.next_k(0, 5, &rules, &mut b2);
+        let k3 = c1.next(3, 5, &rules, &mut b1);
+        let k0 = c2.next(0, 5, &rules, &mut b2);
 
         assert_eq!(b1[k3], b2[k0],
             "\n32-cell: next_k(3) should equal next_k(0) (both full)\n  k3: {:?}\n  k0: {:?}",
@@ -1357,7 +1148,7 @@ mod test_next {
 
         // next_k(2, 6) should give 2 steps
         let (mut cell, mut buf_k) = make_glider_64();
-        let k2_idx = cell.next_k(2, 6, &rules, &mut buf_k);
+        let k2_idx = cell.next(2, 6, &rules, &mut buf_k);
         let k2_render = render_cell(buf_k[k2_idx], &buf_k, 5);
 
         // 2x single steps for ground truth

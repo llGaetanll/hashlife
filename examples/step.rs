@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     eprintln!("Loaded world: depth={}", world.depth);
     world.dump_tree();
-    world.next();
+    world.next(1);
     eprintln!("\nAfter 1 step: depth={}", world.depth);
     world.dump_tree();
 

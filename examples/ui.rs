@@ -142,7 +142,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 cam.resize(cols, rows);
             }
             Some(Event::Next) => {
-                world.next();
+                world.next(1);
             }
             Some(Event::ResetView) => {
                 cam.reset_view();

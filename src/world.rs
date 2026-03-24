@@ -95,10 +95,12 @@ impl World {
         }
     }
 
-    pub fn next(&mut self) {
+    /// Advance the world by `2^(k-1)` steps (k=1 is 1 step, k=2 is 2 steps, etc.)
+    /// k=0 is maximal (2^(depth-3) steps).
+    pub fn next(&mut self, k: u8) {
         let mut root = self.buf[self.root];
 
-        self.root = root.next_half(&self.rules, &mut self.buf);
+        self.root = root.next(k, self.depth, &self.rules, &mut self.buf);
         self.depth -= 1;
 
         self.grow(1);
