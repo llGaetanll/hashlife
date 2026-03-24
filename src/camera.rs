@@ -637,10 +637,10 @@ fn draw_rule(cam: &mut impl Camera, rule: u16, dx: CellOffset, dy: CellOffset, s
 
         // Each rule is 2x2
         1 => {
-            let br = rule & 0x33;
-            let bl = rule & (0x33 << 2);
-            let tr = rule & (0x33 << 8);
-            let tl = rule & (0x33 << 10);
+            let tl = rule & 0xCC00;
+            let tr = rule & 0x3300;
+            let bl = rule & 0x00CC;
+            let br = rule & 0x0033;
 
             if tl != 0 {
                 cam.draw_pixel(dx, dy);
