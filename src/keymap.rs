@@ -1,6 +1,6 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 
-use crate::action::{Action, AppAction, CameraAction, WorldAction};
+use crate::action::{Action, AppAction, CameraAction};
 
 pub fn resolve(event: Event) -> Option<Action> {
     match event {
@@ -77,7 +77,12 @@ fn resolve_key(key: KeyEvent) -> Option<Action> {
         KeyEvent {
             code: KeyCode::Char(' '),
             ..
-        } => Some(Action::World(WorldAction::Step)),
+        } => Some(Action::App(AppAction::TogglePlay)),
+
+        KeyEvent {
+            code: KeyCode::Char('n'),
+            ..
+        } => Some(Action::App(AppAction::Step)),
 
         _ => None,
     }
