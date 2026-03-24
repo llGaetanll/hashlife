@@ -462,8 +462,8 @@ impl Camera for CameraBlock {
             return;
         }
 
-        self.move_right(self.w as u64 / 2);
-        self.move_down(self.h as u64);
+        self.move_right(self.w as u64 / 4);
+        self.move_down(self.h as u64 / 2);
 
         self.scale -= 1;
     }
@@ -471,8 +471,8 @@ impl Camera for CameraBlock {
     fn zoom_out(&mut self) {
         self.scale += 1;
 
-        self.move_left(self.w as u64 / 2);
-        self.move_up(self.h as u64);
+        self.move_left(self.w as u64 / 4);
+        self.move_up(self.h as u64 / 2);
     }
 
     fn reset(&mut self) {
