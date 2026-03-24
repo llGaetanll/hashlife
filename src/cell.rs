@@ -1,3 +1,21 @@
+#[cfg(test)]
+static COMPUTE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
+pub fn reset_compute_count() {
+    COMPUTE_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(test)]
+pub fn get_compute_count() -> usize {
+    COMPUTE_COUNT.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn bump_compute_count() {
+    #[cfg(test)]
+    COMPUTE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// On 64 bit machines: 1 followed by 63 0s, `9_223_372_036_854_775_808`.
 /// On 32 bit machines: 1 followed by 31 0s, `2_147_483_648`.
 ///
@@ -171,6 +189,7 @@ impl Cell {
     /// A rule is just returned as a usize, but a cell is inserted into the buf and its index is
     /// returned
     fn compute_full(&mut self, next: &[u16], buf: &mut Vec<Cell>) -> usize {
+        bump_compute_count();
         if self.is_void() {
             0
         } else if self.is_leaf() {
@@ -197,6 +216,7 @@ impl Cell {
     ///
     /// Phase 2 runs at depth `d` if `k == 0` (maximal) or `d <= k + 2`.
     fn compute_k(&mut self, k: u8, d: u8, next: &[u16], buf: &mut Vec<Cell>) -> usize {
+        bump_compute_count();
         let do_phase2 = k == 0 || d <= k + 2;
 
         if self.is_void() {
@@ -1161,5 +1181,76 @@ mod test_next {
 
         assert_eq!(k2_render, step2_render,
             "\n64-cell: next_k(2) should equal 2 single steps");
+    }
+}
+
+#[cfg(test)]
+mod test_hash {
+    use crate::cell::{Cell, reset_compute_count, get_compute_count};
+    use crate::rule_set::B3S23;
+
+    /// Build an n-cell with a glider near the center at the given depth
+    #[rustfmt::skip]
+    fn make_glider(depth: u8) -> (Cell, Vec<Cell>) {
+        assert!(depth >= 4, "need at least a 16-cell for a glider");
+
+        let mut buf = vec![Cell::void()];
+
+        let empty_leaf = Cell::leaf(0, 0, 0, 0);
+        // Glider in the se quadrant of this leaf
+        let glider_leaf = Cell::leaf(0, 0, 0, 0b0010_0001_0111_0000);
+
+        let el = buf.len(); buf.push(empty_leaf);
+        let gl = buf.len(); buf.push(glider_leaf);
+
+        // Depth 4: 16-cell with glider in nw's se corner
+        let nw16 = Cell::new(el, el, el, gl);
+        let empty16 = Cell::new(el, el, el, el);
+        let nw16_idx = buf.len(); buf.push(nw16);
+        let empty16_idx = buf.len(); buf.push(empty16);
+
+        let mut root = Cell::new(nw16_idx, empty16_idx, empty16_idx, empty16_idx);
+
+        // Wrap in progressively larger nodes up to target depth
+        for _ in 5..=depth {
+            let root_idx = buf.len(); buf.push(root);
+            buf.push(empty16);
+
+            // Rebuild empty subtree at correct depth by wrapping
+            // Actually we need properly deep empty subtrees. Let's just use
+            // the void cell (index 0) — children pointing at void works for
+            // any depth since void is the universal empty.
+            root = Cell::new(root_idx, 0, 0, 0);
+        }
+
+        (root, buf)
+    }
+
+    #[test]
+    fn test_compute_count_scaling() {
+        let rules = B3S23.compute_rules();
+
+        let mut counts = Vec::new();
+
+        for depth in 4..=8 {
+            let (mut cell, mut buf) = make_glider(depth);
+
+            reset_compute_count();
+            cell.next(0, depth, &rules, &mut buf);
+            let count = get_compute_count();
+
+            eprintln!("depth {depth} ({}x{} cell): {count} compute calls",
+                1u64 << depth, 1u64 << depth);
+            counts.push(count);
+        }
+
+        // Without memoization, compute calls grow exponentially.
+        // Log the ratios so we can see the blowup and later confirm
+        // memoization flattens it.
+        for i in 1..counts.len() {
+            let ratio = counts[i] as f64 / counts[i - 1] as f64;
+            eprintln!("depth {} -> {}: {:.1}x",
+                i + 4, i + 5, ratio);
+        }
     }
 }
