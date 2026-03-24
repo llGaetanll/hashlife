@@ -35,12 +35,18 @@ pub const RES_UNSET_MASK: usize = LEAF_MASK;
 /// A `CellHash` is either an index into a list of `Cell`s, or 4 cell stored directly as a u16
 pub type CellHash = usize;
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Cell {
     pub nw: CellHash,
     pub ne: CellHash,
     pub sw: CellHash,
     pub se: CellHash,
+
+    /// Cached result index (RES_UNSET_MASK = not computed)
+    pub res: CellHash,
+
+    /// Hash chain link (0 = end of chain)
+    pub next_hash: CellHash,
 }
 
 impl Cell {
@@ -60,6 +66,8 @@ impl Cell {
             ne: 0,
             sw: 0,
             se: 0,
+            res: RES_UNSET_MASK,
+            next_hash: 0,
         }
     }
 
@@ -70,6 +78,8 @@ impl Cell {
             ne: ne as usize,
             sw: sw as usize,
             se: se as usize,
+            res: RES_UNSET_MASK,
+            next_hash: 0,
         }
     }
 
@@ -79,7 +89,14 @@ impl Cell {
 
     /// Create a new node given 4 indices. We assume the node has already been inserted
     pub const fn new(nw: usize, ne: usize, sw: usize, se: usize) -> Self {
-        Self { nw, ne, sw, se }
+        Self {
+            nw,
+            ne,
+            sw,
+            se,
+            res: RES_UNSET_MASK,
+            next_hash: 0,
+        }
     }
 
     pub fn children(&self) -> Option<[usize; 4]> {
@@ -163,6 +180,14 @@ impl Cell {
     }
 }
 
+impl PartialEq for Cell {
+    fn eq(&self, other: &Self) -> bool {
+        self.nw == other.nw && self.ne == other.ne && self.sw == other.sw && self.se == other.se
+    }
+}
+
+impl Eq for Cell {}
+
 impl std::fmt::Debug for Cell {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.is_leaf() {
@@ -204,87 +229,50 @@ pub mod cell_utils {
 
     /// Given two cells `w` and `e`, returns the cell at their center.
     pub fn h_center(w: Cell, e: Cell) -> Cell {
-        Cell {
-            nw: w.ne,
-            ne: e.nw,
-            sw: w.se,
-            se: e.sw,
-        }
+        Cell::new(w.ne, e.nw, w.se, e.sw)
     }
 
     /// Given two 16-cells `n` and `s`, returns the cell at their center.
     pub fn v_center(n: Cell, s: Cell) -> Cell {
-        Cell {
-            nw: n.sw,
-            ne: n.se,
-            sw: s.nw,
-            se: s.ne,
-        }
+        Cell::new(n.sw, n.se, s.nw, s.ne)
     }
 
     /// Given an n-cell, returns the n/2 cell at its center
     /// NOTE: Must be at least a 16 cell
     pub fn center(c: Cell, buf: &[Cell]) -> Cell {
-        Cell {
-            nw: buf[c.nw].se,
-            ne: buf[c.ne].sw,
-            sw: buf[c.sw].ne,
-            se: buf[c.se].nw,
-        }
+        Cell::new(buf[c.nw].se, buf[c.ne].sw, buf[c.sw].ne, buf[c.se].nw)
     }
 
     /// Given two 8 cells `w` and `e`, returns the leaf at their center.
     pub fn h_center8(w: Cell, e: Cell) -> Cell {
-        let nw = w.ne as u16;
-        let ne = (e.nw & !LEAF_MASK) as u16;
-        let sw = w.se as u16;
-        let se = e.sw as u16;
-
-        Cell {
-            nw: nw as usize | LEAF_MASK,
-            ne: ne as usize,
-            sw: sw as usize,
-            se: se as usize,
-        }
+        Cell::leaf(
+            w.ne as u16,
+            (e.nw & !LEAF_MASK) as u16,
+            w.se as u16,
+            e.sw as u16,
+        )
     }
 
     /// Given two 8 cells `n` and `s`, returns the leaf at their center.
     pub fn v_center8(n: Cell, s: Cell) -> Cell {
-        let nw = n.sw as u16;
-        let ne = n.se as u16;
-        let sw = (s.nw & !LEAF_MASK) as u16;
-        let se = s.ne as u16;
-
-        Cell {
-            nw: nw as usize | LEAF_MASK,
-            ne: ne as usize,
-            sw: sw as usize,
-            se: se as usize,
-        }
+        Cell::leaf(
+            n.sw as u16,
+            n.se as u16,
+            (s.nw & !LEAF_MASK) as u16,
+            s.ne as u16,
+        )
     }
 
     /// On a 16 cell, this is its 8x8 center leaf
     pub fn center16(cell: Cell, buf: &[Cell]) -> Cell {
         assert!(cell.is_16(buf));
 
-        // leaves (i.e. 8 cells)
-        let nw = buf[cell.nw];
-        let ne = buf[cell.ne];
-        let sw = buf[cell.sw];
-        let se = buf[cell.se];
-
-        // These are rules, since the cell is not a grandparent
-        let nw = nw.se as u16;
-        let ne = ne.sw as u16;
-        let sw = sw.ne as u16;
-        let se = (se.nw & !LEAF_MASK) as u16;
-
-        Cell {
-            nw: nw as usize | LEAF_MASK,
-            ne: ne as usize,
-            sw: sw as usize,
-            se: se as usize,
-        }
+        Cell::leaf(
+            buf[cell.nw].se as u16,
+            buf[cell.ne].sw as u16,
+            buf[cell.sw].ne as u16,
+            (buf[cell.se].nw & !LEAF_MASK) as u16,
+        )
     }
 }
 
@@ -292,8 +280,8 @@ pub mod cell_utils {
 mod test_next {
     use crate::camera::Camera;
     use crate::cell::Cell;
-    use crate::world::World;
     use crate::rule_set::B3S23;
+    use crate::world::World;
     use crate::CellOffset;
 
     /// Draws a 4 cell
@@ -373,7 +361,8 @@ mod test_next {
         let leaf = Cell::leaf(nw, 0, 0, 0);
 
         let mut buf = vec![Cell::void()];
-        let leaf_idx = buf.len(); buf.push(leaf);
+        let leaf_idx = buf.len();
+        buf.push(leaf);
         let mut world = World::from_parts(B3S23, buf, Cell::new(leaf_idx, 0, 0, 0), 4);
 
         let result = world.compute_leaf(leaf_idx);
@@ -680,9 +669,9 @@ mod test_next {
 
 #[cfg(test)]
 mod test_hash {
-    use crate::cell::{Cell, reset_compute_count, get_compute_count};
-    use crate::world::World;
+    use crate::cell::{get_compute_count, reset_compute_count, Cell};
     use crate::rule_set::B3S23;
+    use crate::world::World;
 
     /// Build a World with a glider near the center at the given depth
     #[rustfmt::skip]
@@ -726,8 +715,11 @@ mod test_hash {
             world.next(0);
             let count = get_compute_count();
 
-            eprintln!("depth {depth} ({}x{} cell): {count} compute calls",
-                1u64 << depth, 1u64 << depth);
+            eprintln!(
+                "depth {depth} ({}x{} cell): {count} compute calls",
+                1u64 << depth,
+                1u64 << depth
+            );
             counts.push(count);
         }
 
@@ -736,8 +728,7 @@ mod test_hash {
         // memoization flattens it.
         for i in 1..counts.len() {
             let ratio = counts[i] as f64 / counts[i - 1] as f64;
-            eprintln!("depth {} -> {}: {:.1}x",
-                i + 4, i + 5, ratio);
+            eprintln!("depth {} -> {}: {:.1}x", i + 4, i + 5, ratio);
         }
     }
 }

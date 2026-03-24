@@ -3,7 +3,27 @@ use crate::rle_data::RleBufferEntry;
 use crate::rule_set::RuleSet;
 
 use crate::WorldOffset;
-use crate::cell::{Cell, LEAF_MASK, bump_compute_count, cell_utils};
+use crate::cell::{Cell, LEAF_MASK, RES_UNSET_MASK, bump_compute_count, cell_utils};
+
+const INITIAL_HASH_SIZE: usize = 1021;
+
+fn next_prime(mut n: usize) -> usize {
+    if n.is_multiple_of(2) { n += 1; }
+    while !is_prime(n) { n += 2; }
+    n
+}
+
+fn is_prime(n: usize) -> bool {
+    if n < 2 { return false; }
+    if n < 4 { return true; }
+    if n.is_multiple_of(2) || n.is_multiple_of(3) { return false; }
+    let mut i = 5;
+    while i * i <= n {
+        if n.is_multiple_of(i) || n.is_multiple_of(i + 2) { return false; }
+        i += 6;
+    }
+    true
+}
 
 pub struct World {
     /// Life rules
@@ -21,6 +41,12 @@ pub struct World {
     ///
     /// In general, `n` yields a world sidelength of `2^n`
     pub depth: u8,
+
+    /// Hash table: each slot holds a buf index (head of chain) or 0 (empty)
+    hashtab: Vec<usize>,
+
+    /// Number of entries in the hash table
+    hashpop: usize,
 }
 
 impl World {
@@ -38,6 +64,8 @@ impl World {
             root,
             buf,
             depth: 3,
+            hashtab: vec![0; INITIAL_HASH_SIZE],
+            hashpop: 0,
         }
     }
 
@@ -53,6 +81,8 @@ impl World {
             root: root_idx,
             buf,
             depth,
+            hashtab: vec![0; INITIAL_HASH_SIZE],
+            hashpop: 0,
         }
     }
 
@@ -119,34 +149,21 @@ impl World {
     /// Grow the cell at `idx` about its center by a factor of 2, return new index
     fn grow_cell(&mut self, idx: usize) -> usize {
         let cell = self.buf[idx];
-        let mask = if cell.is_leaf() { LEAF_MASK } else { 0 };
 
-        let nw = Cell {
-            nw: mask,
-            ne: 0,
-            sw: 0,
-            se: cell.nw & !mask,
-        };
-
-        let ne = Cell {
-            nw: mask,
-            ne: 0,
-            sw: cell.ne,
-            se: 0,
-        };
-
-        let sw = Cell {
-            nw: mask,
-            ne: cell.sw,
-            sw: 0,
-            se: 0,
-        };
-
-        let se = Cell {
-            nw: cell.se | mask,
-            ne: 0,
-            sw: 0,
-            se: 0,
+        let (nw, ne, sw, se) = if cell.is_leaf() {
+            (
+                Cell::leaf(0, 0, 0, (cell.nw & !LEAF_MASK) as u16),
+                Cell::leaf(0, 0, cell.ne as u16, 0),
+                Cell::leaf(0, cell.sw as u16, 0, 0),
+                Cell::leaf(cell.se as u16, 0, 0, 0),
+            )
+        } else {
+            (
+                Cell::new(0, 0, 0, cell.nw),
+                Cell::new(0, 0, cell.ne, 0),
+                Cell::new(0, cell.sw, 0, 0),
+                Cell::new(cell.se, 0, 0, 0),
+            )
         };
 
         let nw_idx = self.buf.len(); self.buf.push(nw);
@@ -160,11 +177,105 @@ impl World {
         grown_idx
     }
 
-    /// Push a cell into buf and return its index
-    fn push_cell(&mut self, cell: Cell) -> usize {
-        let idx = self.buf.len();
+    /// Find or create a cell (dispatches to find_node or find_leaf)
+    fn find_cell(&mut self, cell: Cell) -> usize {
+        if cell.is_leaf() {
+            self.find_leaf(
+                (cell.nw & !LEAF_MASK) as u16,
+                cell.ne as u16,
+                cell.sw as u16,
+                cell.se as u16,
+            )
+        } else {
+            self.find_node(cell.nw, cell.ne, cell.sw, cell.se)
+        }
+    }
+
+    /// Find or create a node with the given children. Returns buf index.
+    fn find_node(&mut self, nw: usize, ne: usize, sw: usize, se: usize) -> usize {
+        let cell = Cell::new(nw, ne, sw, se);
+        let h = cell.hash() % self.hashtab.len();
+
+        // Walk the chain
+        let mut idx = self.hashtab[h];
+        while idx != 0 {
+            let existing = self.buf[idx];
+            if existing.nw == nw && existing.ne == ne
+                && existing.sw == sw && existing.se == se
+                && !existing.is_leaf()
+            {
+                return idx;
+            }
+            idx = existing.next_hash;
+        }
+
+        // Not found — insert
+        let new_idx = self.buf.len();
+        let mut cell = cell;
+        cell.next_hash = self.hashtab[h];
         self.buf.push(cell);
-        idx
+        self.hashtab[h] = new_idx;
+        self.hashpop += 1;
+
+        if self.hashpop > self.hashtab.len() {
+            self.resize_hashtab();
+        }
+
+        new_idx
+    }
+
+    /// Find or create a leaf with the given quadrants. Returns buf index.
+    fn find_leaf(&mut self, nw: u16, ne: u16, sw: u16, se: u16) -> usize {
+        let cell = Cell::leaf(nw, ne, sw, se);
+        let h = cell.hash() % self.hashtab.len();
+
+        // Walk the chain
+        let mut idx = self.hashtab[h];
+        while idx != 0 {
+            let existing = self.buf[idx];
+            if existing.is_leaf()
+                && (existing.nw & !LEAF_MASK) as u16 == nw
+                && existing.ne as u16 == ne
+                && existing.sw as u16 == sw
+                && existing.se as u16 == se
+            {
+                return idx;
+            }
+            idx = existing.next_hash;
+        }
+
+        // Not found — insert
+        let new_idx = self.buf.len();
+        let mut cell = cell;
+        cell.next_hash = self.hashtab[h];
+        self.buf.push(cell);
+        self.hashtab[h] = new_idx;
+        self.hashpop += 1;
+
+        if self.hashpop > self.hashtab.len() {
+            self.resize_hashtab();
+        }
+
+        new_idx
+    }
+
+    /// Resize the hash table to roughly double its size (next prime).
+    fn resize_hashtab(&mut self) {
+        let new_size = next_prime(self.hashtab.len() * 2);
+        let mut new_tab = vec![0usize; new_size];
+
+        // Rehash all entries
+        for i in 1..self.buf.len() {
+            let cell = self.buf[i];
+            if cell.is_void() && i == 0 {
+                continue;
+            }
+            let h = cell.hash() % new_size;
+            self.buf[i].next_hash = new_tab[h];
+            new_tab[h] = i;
+        }
+
+        self.hashtab = new_tab;
     }
 
     /// Compute the result of a cell, dispatching based on type.
@@ -174,17 +285,25 @@ impl World {
         bump_compute_count();
         let cell = self.buf[idx];
 
-        if cell.is_void() {
+        // Check result cache
+        if cell.res != RES_UNSET_MASK {
+            return cell.res;
+        }
+
+        let res = if cell.is_void() {
             0
         } else if cell.is_leaf() {
             self.compute_leaf(idx) as usize
         } else if cell.is_16(&self.buf) {
             let result = self.compute_node16_full(idx);
-            self.push_cell(result)
+            self.find_cell(result)
         } else {
             let result = self.compute_node_full(idx);
-            self.push_cell(result)
-        }
+            self.find_cell(result)
+        };
+
+        self.buf[idx].res = res;
+        res
     }
 
     /// Unified compute with `k` and depth `d`.
@@ -205,14 +324,14 @@ impl World {
             } else {
                 self.compute_node16_half(idx)
             };
-            self.push_cell(result)
+            self.find_cell(result)
         } else {
             let result = if do_phase2 {
                 self.compute_node_full_k(idx, k, d)
             } else {
                 self.compute_node_half_k(idx, k, d)
             };
-            self.push_cell(result)
+            self.find_cell(result)
         }
     }
 
@@ -232,11 +351,11 @@ impl World {
         let w = cell_utils::v_center(self.buf[nw], self.buf[sw]);
         let c = cell_utils::center(cell, &self.buf);
 
-        let n_idx = self.push_cell(n);
-        let s_idx = self.push_cell(s);
-        let e_idx = self.push_cell(e);
-        let w_idx = self.push_cell(w);
-        let c_idx = self.push_cell(c);
+        let n_idx = self.find_cell(n);
+        let s_idx = self.find_cell(s);
+        let e_idx = self.find_cell(e);
+        let w_idx = self.find_cell(w);
+        let c_idx = self.find_cell(c);
 
         let n00 = self.compute_full(nw);
         let n01 = self.compute_full(n_idx);
@@ -248,10 +367,10 @@ impl World {
         let n21 = self.compute_full(s_idx);
         let n22 = self.compute_full(se);
 
-        let tl = self.push_cell(Cell::new(n00, n01, n10, n11));
-        let tr = self.push_cell(Cell::new(n01, n02, n11, n12));
-        let bl = self.push_cell(Cell::new(n10, n11, n20, n21));
-        let br = self.push_cell(Cell::new(n11, n12, n21, n22));
+        let tl = self.find_node(n00, n01, n10, n11);
+        let tr = self.find_node(n01, n02, n11, n12);
+        let bl = self.find_node(n10, n11, n20, n21);
+        let br = self.find_node(n11, n12, n21, n22);
 
         let nw = self.compute_full(tl);
         let ne = self.compute_full(tr);
@@ -276,11 +395,11 @@ impl World {
         let w = cell_utils::v_center(self.buf[nw], self.buf[sw]);
         let c = cell_utils::center(cell, &self.buf);
 
-        let n_idx = self.push_cell(n);
-        let s_idx = self.push_cell(s);
-        let e_idx = self.push_cell(e);
-        let w_idx = self.push_cell(w);
-        let c_idx = self.push_cell(c);
+        let n_idx = self.find_cell(n);
+        let s_idx = self.find_cell(s);
+        let e_idx = self.find_cell(e);
+        let w_idx = self.find_cell(w);
+        let c_idx = self.find_cell(c);
 
         let d1 = d - 1;
         let n00 = self.compute_k(nw,    k, d1);
@@ -293,10 +412,10 @@ impl World {
         let n21 = self.compute_k(s_idx, k, d1);
         let n22 = self.compute_k(se,    k, d1);
 
-        let tl = self.push_cell(Cell::new(n00, n01, n10, n11));
-        let tr = self.push_cell(Cell::new(n01, n02, n11, n12));
-        let bl = self.push_cell(Cell::new(n10, n11, n20, n21));
-        let br = self.push_cell(Cell::new(n11, n12, n21, n22));
+        let tl = self.find_node(n00, n01, n10, n11);
+        let tr = self.find_node(n01, n02, n11, n12);
+        let bl = self.find_node(n10, n11, n20, n21);
+        let br = self.find_node(n11, n12, n21, n22);
 
         let nw = self.compute_full(tl);
         let ne = self.compute_full(tr);
@@ -327,11 +446,11 @@ impl World {
         let w = cell_utils::v_center(self.buf[nw], self.buf[sw]);
         let c = cell_utils::center(cell, &self.buf);
 
-        let n_idx = self.push_cell(n);
-        let s_idx = self.push_cell(s);
-        let e_idx = self.push_cell(e);
-        let w_idx = self.push_cell(w);
-        let c_idx = self.push_cell(c);
+        let n_idx = self.find_cell(n);
+        let s_idx = self.find_cell(s);
+        let e_idx = self.find_cell(e);
+        let w_idx = self.find_cell(w);
+        let c_idx = self.find_cell(c);
 
         let d1 = d - 1;
         let n00 = self.compute_k(nw,    k, d1);
@@ -346,40 +465,40 @@ impl World {
 
         // Skip phase 2: extract centers
         if results_are_leaves {
-            let nw = self.push_cell(Cell::leaf(
+            let nw = self.find_leaf(
                 self.buf[n00].se as u16,
                 self.buf[n01].sw as u16,
                 self.buf[n10].ne as u16,
                 (self.buf[n11].nw & !LEAF_MASK) as u16,
-            ));
-            let ne = self.push_cell(Cell::leaf(
+            );
+            let ne = self.find_leaf(
                 self.buf[n01].se as u16,
                 self.buf[n02].sw as u16,
                 self.buf[n11].ne as u16,
                 (self.buf[n12].nw & !LEAF_MASK) as u16,
-            ));
-            let sw = self.push_cell(Cell::leaf(
+            );
+            let sw = self.find_leaf(
                 self.buf[n10].se as u16,
                 self.buf[n11].sw as u16,
                 self.buf[n20].ne as u16,
                 (self.buf[n21].nw & !LEAF_MASK) as u16,
-            ));
-            let se = self.push_cell(Cell::leaf(
+            );
+            let se = self.find_leaf(
                 self.buf[n11].se as u16,
                 self.buf[n12].sw as u16,
                 self.buf[n21].ne as u16,
                 (self.buf[n22].nw & !LEAF_MASK) as u16,
-            ));
+            );
 
             Cell::new(nw, ne, sw, se)
         } else {
-            let nw = self.push_cell(cell_utils::center(
+            let nw = self.find_cell(cell_utils::center(
                 Cell::new(n00, n01, n10, n11), &self.buf));
-            let ne = self.push_cell(cell_utils::center(
+            let ne = self.find_cell(cell_utils::center(
                 Cell::new(n01, n02, n11, n12), &self.buf));
-            let sw = self.push_cell(cell_utils::center(
+            let sw = self.find_cell(cell_utils::center(
                 Cell::new(n10, n11, n20, n21), &self.buf));
-            let se = self.push_cell(cell_utils::center(
+            let se = self.find_cell(cell_utils::center(
                 Cell::new(n11, n12, n21, n22), &self.buf));
 
             Cell::new(nw, ne, sw, se)
@@ -396,11 +515,11 @@ impl World {
         let se = cell.se;
 
         // cardinal pseudo-leaves
-        let n_idx = self.push_cell(cell_utils::h_center8(self.buf[nw], self.buf[ne]));
-        let s_idx = self.push_cell(cell_utils::h_center8(self.buf[sw], self.buf[se]));
-        let e_idx = self.push_cell(cell_utils::v_center8(self.buf[ne], self.buf[se]));
-        let w_idx = self.push_cell(cell_utils::v_center8(self.buf[nw], self.buf[sw]));
-        let c_idx = self.push_cell(cell_utils::center16(cell, &self.buf));
+        let n_idx = self.find_cell(cell_utils::h_center8(self.buf[nw], self.buf[ne]));
+        let s_idx = self.find_cell(cell_utils::h_center8(self.buf[sw], self.buf[se]));
+        let e_idx = self.find_cell(cell_utils::v_center8(self.buf[ne], self.buf[se]));
+        let w_idx = self.find_cell(cell_utils::v_center8(self.buf[nw], self.buf[sw]));
+        let c_idx = self.find_cell(cell_utils::center16(cell, &self.buf));
 
         // All of these are rules (u16 results from leaves)
         let n00 = self.compute_full(nw)    as u16;
@@ -414,10 +533,10 @@ impl World {
         let n22 = self.compute_full(se)    as u16;
 
         // Build phase 2 leaves and compute their results
-        let tl = self.push_cell(Cell::leaf(n00, n01, n10, n11));
-        let tr = self.push_cell(Cell::leaf(n01, n02, n11, n12));
-        let bl = self.push_cell(Cell::leaf(n10, n11, n20, n21));
-        let br = self.push_cell(Cell::leaf(n11, n12, n21, n22));
+        let tl = self.find_leaf(n00, n01, n10, n11);
+        let tr = self.find_leaf(n01, n02, n11, n12);
+        let bl = self.find_leaf(n10, n11, n20, n21);
+        let br = self.find_leaf(n11, n12, n21, n22);
 
         let tl_res = self.compute_full(tl) as u16;
         let tr_res = self.compute_full(tr) as u16;
@@ -436,11 +555,11 @@ impl World {
         let sw = cell.sw;
         let se = cell.se;
 
-        let n_idx = self.push_cell(cell_utils::h_center8(self.buf[nw], self.buf[ne]));
-        let s_idx = self.push_cell(cell_utils::h_center8(self.buf[sw], self.buf[se]));
-        let e_idx = self.push_cell(cell_utils::v_center8(self.buf[ne], self.buf[se]));
-        let w_idx = self.push_cell(cell_utils::v_center8(self.buf[nw], self.buf[sw]));
-        let c_idx = self.push_cell(cell_utils::center16(cell, &self.buf));
+        let n_idx = self.find_cell(cell_utils::h_center8(self.buf[nw], self.buf[ne]));
+        let s_idx = self.find_cell(cell_utils::h_center8(self.buf[sw], self.buf[se]));
+        let e_idx = self.find_cell(cell_utils::v_center8(self.buf[ne], self.buf[se]));
+        let w_idx = self.find_cell(cell_utils::v_center8(self.buf[nw], self.buf[sw]));
+        let c_idx = self.find_cell(cell_utils::center16(cell, &self.buf));
 
         let n00 = self.compute_full(nw)    as u16;
         let n01 = self.compute_full(n_idx) as u16;
