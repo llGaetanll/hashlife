@@ -32,6 +32,9 @@ pub const LEAF_MASK: usize = {
 /// If we see a leading bit on `res`, that means the result is not computed
 pub const RES_UNSET_MASK: usize = LEAF_MASK;
 
+/// Sentinel value for "end of hash chain" — can never be a valid buf index
+pub const HASH_CHAIN_END: usize = usize::MAX;
+
 /// A `CellHash` is either an index into a list of `Cell`s, or 4 cell stored directly as a u16
 pub type CellHash = usize;
 
@@ -45,7 +48,7 @@ pub struct Cell {
     /// Cached result index (RES_UNSET_MASK = not computed)
     pub res: CellHash,
 
-    /// Hash chain link (0 = end of chain)
+    /// Hash chain link (HASH_CHAIN_END = end of chain)
     pub next_hash: CellHash,
 }
 
@@ -67,7 +70,7 @@ impl Cell {
             sw: 0,
             se: 0,
             res: RES_UNSET_MASK,
-            next_hash: 0,
+            next_hash: HASH_CHAIN_END,
         }
     }
 
@@ -79,7 +82,7 @@ impl Cell {
             sw: sw as usize,
             se: se as usize,
             res: RES_UNSET_MASK,
-            next_hash: 0,
+            next_hash: HASH_CHAIN_END,
         }
     }
 
@@ -95,7 +98,7 @@ impl Cell {
             sw,
             se,
             res: RES_UNSET_MASK,
-            next_hash: 0,
+            next_hash: HASH_CHAIN_END,
         }
     }
 

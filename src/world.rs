@@ -3,7 +3,7 @@ use crate::rle_data::RleBufferEntry;
 use crate::rule_set::RuleSet;
 
 use crate::WorldOffset;
-use crate::cell::{Cell, LEAF_MASK, RES_UNSET_MASK, bump_compute_count, cell_utils};
+use crate::cell::{Cell, HASH_CHAIN_END, LEAF_MASK, RES_UNSET_MASK, bump_compute_count, cell_utils};
 
 const INITIAL_HASH_SIZE: usize = 1021;
 
@@ -54,18 +54,20 @@ impl World {
     pub fn new(rule: RuleSet) -> Self {
         let rules = rule.compute_rules();
 
-        // Index 0 is the void cell — used as a sentinel for empty quadrants
-        // and as the hash chain terminator. Not inserted into the hash table.
-        let buf = vec![Cell::void()];
+        let buf = vec![];
 
         let mut world = Self {
             rules,
             root: 0,
             buf,
             depth: 3,
-            hashtab: vec![0; INITIAL_HASH_SIZE],
+            hashtab: vec![HASH_CHAIN_END; INITIAL_HASH_SIZE],
             hashpop: 0,
         };
+
+        // Void cell lands at index 0 (first find_node call on empty buf)
+        let void_idx = world.find_node(0, 0, 0, 0);
+        debug_assert_eq!(void_idx, 0);
 
         world.root = world.find_leaf(0, 0, 0, 0);
         world
@@ -215,7 +217,7 @@ impl World {
 
         // Walk the chain
         let mut idx = self.hashtab[h];
-        while idx != 0 {
+        while idx != HASH_CHAIN_END {
             let existing = self.buf[idx];
             if existing.nw == nw && existing.ne == ne
                 && existing.sw == sw && existing.se == se
@@ -248,7 +250,7 @@ impl World {
 
         // Walk the chain
         let mut idx = self.hashtab[h];
-        while idx != 0 {
+        while idx != HASH_CHAIN_END {
             let existing = self.buf[idx];
             if existing.is_leaf()
                 && (existing.nw & !LEAF_MASK) as u16 == nw
@@ -279,15 +281,11 @@ impl World {
     /// Resize the hash table to roughly double its size (next prime).
     fn resize_hashtab(&mut self) {
         let new_size = next_prime(self.hashtab.len() * 2);
-        let mut new_tab = vec![0usize; new_size];
+        let mut new_tab = vec![HASH_CHAIN_END; new_size];
 
         // Rehash all entries
-        for i in 1..self.buf.len() {
-            let cell = self.buf[i];
-            if cell.is_void() && i == 0 {
-                continue;
-            }
-            let h = cell.hash() % new_size;
+        for i in 0..self.buf.len() {
+            let h = self.buf[i].hash() % new_size;
             self.buf[i].next_hash = new_tab[h];
             new_tab[h] = i;
         }
