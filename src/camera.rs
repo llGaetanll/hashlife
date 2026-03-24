@@ -22,6 +22,8 @@ pub trait Camera {
     fn draw(&mut self, world: &World);
     fn reset(&mut self);
     fn render(&mut self) -> &str;
+    fn scale(&self) -> u8;
+    fn position(&self) -> (WorldOffset, WorldOffset);
 }
 
 /// Hex values of braille dots
@@ -145,15 +147,7 @@ impl Camera for CameraBraille {
         // Since self.x and self.y encode true position, we need to divide them by 2^scale
         let (dx, dy) = (self.x >> self.scale, self.y >> self.scale);
 
-        draw_cell(
-            self,
-            buf,
-            cell,
-            dx as CellOffset,
-            dy as CellOffset,
-            n,
-            scale,
-        );
+        draw_cell(self, buf, cell, dx, dy, n, scale);
     }
 
     fn zoom_in(&mut self) {
@@ -209,6 +203,14 @@ impl Camera for CameraBraille {
         self.fb.push('\n');
 
         &self.fb
+    }
+
+    fn scale(&self) -> u8 {
+        self.scale
+    }
+
+    fn position(&self) -> (WorldOffset, WorldOffset) {
+        (self.x, self.y)
     }
 }
 
@@ -446,15 +448,7 @@ impl Camera for CameraBlock {
 
         let (dx, dy) = (self.x >> self.scale, self.y >> self.scale);
 
-        draw_cell(
-            self,
-            buf,
-            cell,
-            dx as CellOffset,
-            dy as CellOffset,
-            n,
-            scale,
-        );
+        draw_cell(self, buf, cell, dx, dy, n, scale);
     }
 
     fn zoom_in(&mut self) {
@@ -508,6 +502,14 @@ impl Camera for CameraBlock {
         self.fb.push('\n');
 
         &self.fb
+    }
+
+    fn scale(&self) -> u8 {
+        self.scale
+    }
+
+    fn position(&self) -> (WorldOffset, WorldOffset) {
+        (self.x, self.y)
     }
 }
 
@@ -603,7 +605,7 @@ impl CameraBlock {
 
 /// Draws a 4 cell
 /// dx and dy are offsets in screen pixels.
-fn draw_rule(cam: &mut impl Camera, rule: u16, dx: CellOffset, dy: CellOffset, scale: u32) {
+fn draw_rule(cam: &mut impl Camera, rule: u16, dx: WorldOffset, dy: WorldOffset, scale: u32) {
     match scale {
         // Each rule is 4x4
         // This is the closest zoom possible
@@ -612,7 +614,7 @@ fn draw_rule(cam: &mut impl Camera, rule: u16, dx: CellOffset, dy: CellOffset, s
             let mut mask = 1 << 0xF;
             while mask > 0 {
                 if rule & mask == mask {
-                    cam.draw_pixel(dx + x, dy + y);
+                    cam.draw_pixel((dx + x) as CellOffset, (dy + y) as CellOffset);
                 }
 
                 x = (x + 1) % 4;
@@ -633,26 +635,26 @@ fn draw_rule(cam: &mut impl Camera, rule: u16, dx: CellOffset, dy: CellOffset, s
             let br = rule & 0x0033;
 
             if tl != 0 {
-                cam.draw_pixel(dx, dy);
+                cam.draw_pixel(dx as CellOffset, dy as CellOffset);
             }
 
             if tr != 0 {
-                cam.draw_pixel(dx + 1, dy);
+                cam.draw_pixel((dx + 1) as CellOffset, dy as CellOffset);
             }
 
             if bl != 0 {
-                cam.draw_pixel(dx, dy + 1);
+                cam.draw_pixel(dx as CellOffset, (dy + 1) as CellOffset);
             }
 
             if br != 0 {
-                cam.draw_pixel(dx + 1, dy + 1);
+                cam.draw_pixel((dx + 1) as CellOffset, (dy + 1) as CellOffset);
             }
         }
 
         // Each rule is 1x1
         2 => {
             if rule != 0 {
-                cam.draw_pixel(dx, dy);
+                cam.draw_pixel(dx as CellOffset, dy as CellOffset);
             }
         }
 
@@ -661,7 +663,7 @@ fn draw_rule(cam: &mut impl Camera, rule: u16, dx: CellOffset, dy: CellOffset, s
     }
 }
 
-fn draw_leaf(cam: &mut impl Camera, cell: Cell, dx: CellOffset, dy: CellOffset, scale: u32) {
+fn draw_leaf(cam: &mut impl Camera, cell: Cell, dx: WorldOffset, dy: WorldOffset, scale: u32) {
     assert!(cell.is_leaf());
 
     match scale {
@@ -692,7 +694,7 @@ fn draw_leaf(cam: &mut impl Camera, cell: Cell, dx: CellOffset, dy: CellOffset, 
         // Each leaf is 1x1
         3 => {
             if !cell.is_void() {
-                cam.draw_pixel(dx, dy);
+                cam.draw_pixel(dx as CellOffset, dy as CellOffset);
             }
         }
 
@@ -706,8 +708,8 @@ fn draw_cell(
     cam: &mut impl Camera,
     buf: &[Cell],
     cell: Cell,
-    dx: CellOffset,
-    dy: CellOffset,
+    dx: WorldOffset,
+    dy: WorldOffset,
     n: u32,
     scale: u32,
 ) {
@@ -717,12 +719,11 @@ fn draw_cell(
     }
 
     // The square width of a node in screen pixels
-    let sw = 2u16.saturating_pow(n - scale);
+    let sw: WorldOffset = 2_i128.saturating_pow(n - scale);
 
     // Cull if entirely off-screen
     let (pw, ph) = cam.pixel_size();
-    let sw_i = sw as CellOffset;
-    if dx + sw_i <= 0 || dy + sw_i <= 0 || dx >= pw || dy >= ph {
+    if dx + sw <= 0 || dy + sw <= 0 || dx >= pw as WorldOffset || dy >= ph as WorldOffset {
         return;
     }
 
@@ -731,7 +732,7 @@ fn draw_cell(
 
         // Single pixel cell
     } else if sw == 1 {
-        cam.draw_pixel(dx, dy);
+        cam.draw_pixel(dx as CellOffset, dy as CellOffset);
 
     // Leaf cell
     } else if n == 3 {
@@ -739,12 +740,11 @@ fn draw_cell(
 
     // Non-leaf cell
     } else {
-        // As we recurse, the square width of nodes is halved
-        let sw = (sw >> 1) as CellOffset; // TODO: Not sure about this cast
+        let half = sw / 2;
 
         draw_cell(cam, buf, buf[cell.nw], dx, dy, n - 1, scale);
-        draw_cell(cam, buf, buf[cell.ne], dx + sw, dy, n - 1, scale);
-        draw_cell(cam, buf, buf[cell.sw], dx, dy + sw, n - 1, scale);
-        draw_cell(cam, buf, buf[cell.se], dx + sw, dy + sw, n - 1, scale);
+        draw_cell(cam, buf, buf[cell.ne], dx + half, dy, n - 1, scale);
+        draw_cell(cam, buf, buf[cell.sw], dx, dy + half, n - 1, scale);
+        draw_cell(cam, buf, buf[cell.se], dx + half, dy + half, n - 1, scale);
     }
 }
