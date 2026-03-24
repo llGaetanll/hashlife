@@ -365,6 +365,8 @@ mod test_next {
         buf.push(leaf);
         let mut world = World::from_parts(B3S23, buf, Cell::new(leaf_idx, 0, 0, 0), 4);
 
+        // After canonicalization, find the glider leaf via the root's nw child
+        let leaf_idx = world.buf[world.root].nw;
         let result = world.compute_leaf(leaf_idx);
 
         // After 1 step, center 4x4 (rows 2-5, cols 2-5):

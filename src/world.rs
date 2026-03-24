@@ -54,7 +54,8 @@ impl World {
     pub fn new(rule: RuleSet) -> Self {
         let rules = rule.compute_rules();
 
-        // First cell is the canonical void cell (index 0, not in hash table)
+        // Index 0 is the void cell — used as a sentinel for empty quadrants
+        // and as the hash chain terminator. Not inserted into the hash table.
         let buf = vec![Cell::void()];
 
         let mut world = Self {
@@ -70,21 +71,44 @@ impl World {
         world
     }
 
-    /// Create a world from pre-built parts (for testing)
+    /// Create a world from pre-built parts (for testing).
+    /// Rebuilds the tree through the hash table so all cells are canonical.
     pub fn from_parts(rule: RuleSet, buf: Vec<Cell>, root: Cell, depth: u8) -> Self {
-        let rules = rule.compute_rules();
-        let root_idx = buf.len();
-        let mut buf = buf;
-        buf.push(root);
+        let mut world = Self::new(rule);
+        world.depth = depth;
 
-        Self {
-            rules,
-            root: root_idx,
-            buf,
-            depth,
-            hashtab: vec![0; INITIAL_HASH_SIZE],
-            hashpop: 0,
+        let old_buf = buf;
+        let root_idx = old_buf.len();
+        // Temporarily append root so we can refer to it by index
+        let mut old_buf = old_buf;
+        old_buf.push(root);
+
+        world.root = world.canonicalize(&old_buf, root_idx);
+        world
+    }
+
+    /// Recursively insert a cell from `old_buf` into the canonical hash table.
+    fn canonicalize(&mut self, old_buf: &[Cell], idx: usize) -> usize {
+        let cell = old_buf[idx];
+
+        if cell.is_void() {
+            return 0;
         }
+
+        if cell.is_leaf() {
+            return self.find_leaf(
+                (cell.nw & !LEAF_MASK) as u16,
+                cell.ne as u16,
+                cell.sw as u16,
+                cell.se as u16,
+            );
+        }
+
+        let nw = self.canonicalize(old_buf, cell.nw);
+        let ne = self.canonicalize(old_buf, cell.ne);
+        let sw = self.canonicalize(old_buf, cell.sw);
+        let se = self.canonicalize(old_buf, cell.se);
+        self.find_node(nw, ne, sw, se)
     }
 
     pub fn from_rle(set: RuleSet, data: RleBuffer) -> Self {
