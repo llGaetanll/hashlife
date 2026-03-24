@@ -1,6 +1,7 @@
 use crate::rle_data::RleBuffer;
 use crate::rle_data::RleBufferEntry;
 use crate::rule_set::RuleSet;
+use crate::{info_log, trace_log};
 
 use crate::WorldOffset;
 use crate::cell::{Cell, GC_UNREACHABLE, HASH_CHAIN_END, LEAF_MASK, RES_UNSET_MASK, bump_compute_count, cell_utils};
@@ -47,6 +48,11 @@ pub struct World {
 
     /// Number of entries in the hash table
     pub hashpop: usize,
+
+    /// Step size parameter. `next()` advances by `2^(k-1)` generations.
+    /// k=0 means maximal (2^(depth-3) generations).
+    /// Cached results (`cell.res`) are only valid for the current `k`.
+    k: u8,
 }
 
 impl World {
@@ -63,6 +69,7 @@ impl World {
             depth: 3,
             hashtab: vec![HASH_CHAIN_END; INITIAL_HASH_SIZE],
             hashpop: 0,
+            k: 1,
         };
 
         // Void cell lands at index 0 (first find_node call on empty buf)
@@ -152,13 +159,47 @@ impl World {
         }
     }
 
-    /// Advance the world by `2^(k-1)` steps (k=1 is 1 step, k=2 is 2 steps, etc.)
-    /// k=0 is maximal (2^(depth-3) steps).
-    pub fn next(&mut self, k: u8) {
-        self.root = self.compute_k(self.root, k, self.depth);
-        self.depth -= 1;
+    /// Set the step size parameter. `next()` advances by `2^(k-1)` generations.
+    /// k=0 means maximal (2^(depth-3) generations).
+    /// Invalidates all cached results since they depend on `k`.
+    pub fn set_k(&mut self, k: u8) {
+        if k == self.k {
+            return;
+        }
+        self.k = k;
+        for cell in &mut self.buf {
+            cell.res = RES_UNSET_MASK;
+        }
+    }
 
+    /// Returns the current step size parameter.
+    pub fn k(&self) -> u8 {
+        self.k
+    }
+
+    /// Advance the world by `2^(k-1)` steps, where `k` is the current step size.
+    pub fn next(&mut self) {
+        info_log!(
+            "next(k={}) start: depth={}, buf_len={}, hashpop={}",
+            self.k, self.depth, self.buf.len(), self.hashpop
+        );
+
+        #[cfg(feature = "trace")]
+        let t = std::time::Instant::now();
+        self.root = self.compute(self.root, self.depth);
+        self.depth -= 1;
+        info_log!(
+            "next: compute done in {:?}, buf_len={}, hashpop={}",
+            t.elapsed(), self.buf.len(), self.hashpop
+        );
+
+        #[cfg(feature = "trace")]
+        let t = std::time::Instant::now();
         self.grow(1);
+        info_log!(
+            "next: grow(1) done in {:?}, depth={}",
+            t.elapsed(), self.depth
+        );
     }
 
     /// Grows the world by a factor of 2^k, keeping the previous root at the origin
@@ -281,6 +322,10 @@ impl World {
     /// Resize the hash table to roughly double its size (next prime).
     fn resize_hashtab(&mut self) {
         let new_size = next_prime(self.hashtab.len() * 2);
+        info_log!(
+            "resize_hashtab: {} -> {}, hashpop={}",
+            self.hashtab.len(), new_size, self.hashpop
+        );
         let mut new_tab = vec![HASH_CHAIN_END; new_size];
 
         // Rehash all entries
@@ -340,10 +385,11 @@ impl World {
         }
     }
 
-    /// Compute the result of a cell, dispatching based on type.
+    /// Compute the result of a cell at depth `d`, using the current `k` value.
     ///
     /// The returned `usize` is either a buf index or a u16 rule (for leaf results).
-    pub fn compute_full(&mut self, idx: usize) -> usize {
+    /// Results are cached in `cell.res`.
+    pub fn compute(&mut self, idx: usize, d: u8) -> usize {
         bump_compute_count();
         let cell = self.buf[idx];
 
@@ -352,31 +398,15 @@ impl World {
             return cell.res;
         }
 
-        let res = if cell.is_void() {
-            0
-        } else if cell.is_leaf() {
-            self.compute_leaf(idx) as usize
-        } else if cell.is_16(&self.buf) {
-            let result = self.compute_node16_full(idx);
-            self.find_cell(result)
-        } else {
-            let result = self.compute_node_full(idx);
-            self.find_cell(result)
-        };
-
-        self.buf[idx].res = res;
-        res
-    }
-
-    /// Unified compute with `k` and depth `d`.
-    ///
-    /// Phase 2 runs at depth `d` if `k == 0` (maximal) or `d <= k + 2`.
-    pub fn compute_k(&mut self, idx: usize, k: u8, d: u8) -> usize {
-        bump_compute_count();
-        let cell = self.buf[idx];
+        let k = self.k;
         let do_phase2 = k == 0 || d <= k + 2;
 
-        if cell.is_void() {
+        trace_log!(
+            "compute: idx={}, k={}, d={}, phase2={}, void={}, leaf={}",
+            idx, k, d, do_phase2, cell.is_void(), cell.is_leaf()
+        );
+
+        let res = if cell.is_void() {
             0
         } else if cell.is_leaf() {
             self.compute_leaf(idx) as usize
@@ -389,17 +419,20 @@ impl World {
             self.find_cell(result)
         } else {
             let result = if do_phase2 {
-                self.compute_node_full_k(idx, k, d)
+                self.compute_node_full(idx, d)
             } else {
-                self.compute_node_half_k(idx, k, d)
+                self.compute_node_half(idx, d)
             };
             self.find_cell(result)
-        }
+        };
+
+        self.buf[idx].res = res;
+        res
     }
 
-    /// Computes the result of a 2^k cell for k > 4
+    /// Computes the full (phase-2) result of a node at depth `d`.
     #[rustfmt::skip]
-    fn compute_node_full(&mut self, idx: usize) -> Cell {
+    fn compute_node_full(&mut self, idx: usize, d: u8) -> Cell {
         let cell = self.buf[idx];
         let nw = cell.nw;
         let ne = cell.ne;
@@ -419,77 +452,33 @@ impl World {
         let w_idx = self.find_cell(w);
         let c_idx = self.find_cell(c);
 
-        let n00 = self.compute_full(nw);
-        let n01 = self.compute_full(n_idx);
-        let n02 = self.compute_full(ne);
-        let n10 = self.compute_full(w_idx);
-        let n11 = self.compute_full(c_idx);
-        let n12 = self.compute_full(e_idx);
-        let n20 = self.compute_full(sw);
-        let n21 = self.compute_full(s_idx);
-        let n22 = self.compute_full(se);
-
-        let tl = self.find_node(n00, n01, n10, n11);
-        let tr = self.find_node(n01, n02, n11, n12);
-        let bl = self.find_node(n10, n11, n20, n21);
-        let br = self.find_node(n11, n12, n21, n22);
-
-        let nw = self.compute_full(tl);
-        let ne = self.compute_full(tr);
-        let sw = self.compute_full(bl);
-        let se = self.compute_full(br);
-
-        Cell::new(nw, ne, sw, se)
-    }
-
-    /// Phase 2 variant: runs phase 1 with `compute_k`, phase 2 with `compute_full`.
-    #[rustfmt::skip]
-    fn compute_node_full_k(&mut self, idx: usize, k: u8, d: u8) -> Cell {
-        let cell = self.buf[idx];
-        let nw = cell.nw;
-        let ne = cell.ne;
-        let sw = cell.sw;
-        let se = cell.se;
-
-        let n = cell_utils::h_center(self.buf[nw], self.buf[ne]);
-        let s = cell_utils::h_center(self.buf[sw], self.buf[se]);
-        let e = cell_utils::v_center(self.buf[ne], self.buf[se]);
-        let w = cell_utils::v_center(self.buf[nw], self.buf[sw]);
-        let c = cell_utils::center(cell, &self.buf);
-
-        let n_idx = self.find_cell(n);
-        let s_idx = self.find_cell(s);
-        let e_idx = self.find_cell(e);
-        let w_idx = self.find_cell(w);
-        let c_idx = self.find_cell(c);
-
         let d1 = d - 1;
-        let n00 = self.compute_k(nw,    k, d1);
-        let n01 = self.compute_k(n_idx, k, d1);
-        let n02 = self.compute_k(ne,    k, d1);
-        let n10 = self.compute_k(w_idx, k, d1);
-        let n11 = self.compute_k(c_idx, k, d1);
-        let n12 = self.compute_k(e_idx, k, d1);
-        let n20 = self.compute_k(sw,    k, d1);
-        let n21 = self.compute_k(s_idx, k, d1);
-        let n22 = self.compute_k(se,    k, d1);
+        let n00 = self.compute(nw,    d1);
+        let n01 = self.compute(n_idx, d1);
+        let n02 = self.compute(ne,    d1);
+        let n10 = self.compute(w_idx, d1);
+        let n11 = self.compute(c_idx, d1);
+        let n12 = self.compute(e_idx, d1);
+        let n20 = self.compute(sw,    d1);
+        let n21 = self.compute(s_idx, d1);
+        let n22 = self.compute(se,    d1);
 
         let tl = self.find_node(n00, n01, n10, n11);
         let tr = self.find_node(n01, n02, n11, n12);
         let bl = self.find_node(n10, n11, n20, n21);
         let br = self.find_node(n11, n12, n21, n22);
 
-        let nw = self.compute_full(tl);
-        let ne = self.compute_full(tr);
-        let sw = self.compute_full(bl);
-        let se = self.compute_full(br);
+        let nw = self.compute(tl, d1);
+        let ne = self.compute(tr, d1);
+        let sw = self.compute(bl, d1);
+        let se = self.compute(br, d1);
 
         Cell::new(nw, ne, sw, se)
     }
 
-    /// No-phase-2 variant: runs phase 1 with `compute_k`, then extracts centers.
+    /// Computes the half (no-phase-2) result of a node at depth `d`.
     #[rustfmt::skip]
-    fn compute_node_half_k(&mut self, idx: usize, k: u8, d: u8) -> Cell {
+    fn compute_node_half(&mut self, idx: usize, d: u8) -> Cell {
         let cell = self.buf[idx];
 
         let results_are_leaves = self.buf[cell.nw].is_16(&self.buf)
@@ -515,15 +504,15 @@ impl World {
         let c_idx = self.find_cell(c);
 
         let d1 = d - 1;
-        let n00 = self.compute_k(nw,    k, d1);
-        let n01 = self.compute_k(n_idx, k, d1);
-        let n02 = self.compute_k(ne,    k, d1);
-        let n10 = self.compute_k(w_idx, k, d1);
-        let n11 = self.compute_k(c_idx, k, d1);
-        let n12 = self.compute_k(e_idx, k, d1);
-        let n20 = self.compute_k(sw,    k, d1);
-        let n21 = self.compute_k(s_idx, k, d1);
-        let n22 = self.compute_k(se,    k, d1);
+        let n00 = self.compute(nw,    d1);
+        let n01 = self.compute(n_idx, d1);
+        let n02 = self.compute(ne,    d1);
+        let n10 = self.compute(w_idx, d1);
+        let n11 = self.compute(c_idx, d1);
+        let n12 = self.compute(e_idx, d1);
+        let n20 = self.compute(sw,    d1);
+        let n21 = self.compute(s_idx, d1);
+        let n22 = self.compute(se,    d1);
 
         // Skip phase 2: extract centers
         if results_are_leaves {
@@ -584,15 +573,15 @@ impl World {
         let c_idx = self.find_cell(cell_utils::center16(cell, &self.buf));
 
         // All of these are rules (u16 results from leaves)
-        let n00 = self.compute_full(nw)    as u16;
-        let n01 = self.compute_full(n_idx) as u16;
-        let n02 = self.compute_full(ne)    as u16;
-        let n10 = self.compute_full(w_idx) as u16;
-        let n11 = self.compute_full(c_idx) as u16;
-        let n12 = self.compute_full(e_idx) as u16;
-        let n20 = self.compute_full(sw)    as u16;
-        let n21 = self.compute_full(s_idx) as u16;
-        let n22 = self.compute_full(se)    as u16;
+        let n00 = self.compute(nw,    3) as u16;
+        let n01 = self.compute(n_idx, 3) as u16;
+        let n02 = self.compute(ne,    3) as u16;
+        let n10 = self.compute(w_idx, 3) as u16;
+        let n11 = self.compute(c_idx, 3) as u16;
+        let n12 = self.compute(e_idx, 3) as u16;
+        let n20 = self.compute(sw,    3) as u16;
+        let n21 = self.compute(s_idx, 3) as u16;
+        let n22 = self.compute(se,    3) as u16;
 
         // Build phase 2 leaves and compute their results
         let tl = self.find_leaf(n00, n01, n10, n11);
@@ -600,10 +589,10 @@ impl World {
         let bl = self.find_leaf(n10, n11, n20, n21);
         let br = self.find_leaf(n11, n12, n21, n22);
 
-        let tl_res = self.compute_full(tl) as u16;
-        let tr_res = self.compute_full(tr) as u16;
-        let bl_res = self.compute_full(bl) as u16;
-        let br_res = self.compute_full(br) as u16;
+        let tl_res = self.compute(tl, 3) as u16;
+        let tr_res = self.compute(tr, 3) as u16;
+        let bl_res = self.compute(bl, 3) as u16;
+        let br_res = self.compute(br, 3) as u16;
 
         Cell::leaf(tl_res, tr_res, bl_res, br_res)
     }
@@ -623,15 +612,15 @@ impl World {
         let w_idx = self.find_cell(cell_utils::v_center8(self.buf[nw], self.buf[sw]));
         let c_idx = self.find_cell(cell_utils::center16(cell, &self.buf));
 
-        let n00 = self.compute_full(nw)    as u16;
-        let n01 = self.compute_full(n_idx) as u16;
-        let n02 = self.compute_full(ne)    as u16;
-        let n10 = self.compute_full(w_idx) as u16;
-        let n11 = self.compute_full(c_idx) as u16;
-        let n12 = self.compute_full(e_idx) as u16;
-        let n20 = self.compute_full(sw)    as u16;
-        let n21 = self.compute_full(s_idx) as u16;
-        let n22 = self.compute_full(se)    as u16;
+        let n00 = self.compute(nw,    3) as u16;
+        let n01 = self.compute(n_idx, 3) as u16;
+        let n02 = self.compute(ne,    3) as u16;
+        let n10 = self.compute(w_idx, 3) as u16;
+        let n11 = self.compute(c_idx, 3) as u16;
+        let n12 = self.compute(e_idx, 3) as u16;
+        let n20 = self.compute(sw,    3) as u16;
+        let n21 = self.compute(s_idx, 3) as u16;
+        let n22 = self.compute(se,    3) as u16;
 
         // Skip phase 2: extract centers
         let center = |a: u16, b: u16, c: u16, d: u16| -> u16 {
@@ -874,7 +863,8 @@ mod test_gc {
     fn test_gc_preserves_tree() {
         // GC itself should not change the tree — only the hash table internals
         let mut world = make_glider(6);
-        world.next(0);
+        world.set_k(0);
+        world.next();
         // Can't snapshot, so we just verify GC + step matches no-GC + step
         // (test_gc_step_matches_no_gc covers this). Here, verify GC doesn't
         // crash and hashpop is sane.
@@ -893,8 +883,10 @@ mod test_gc {
         let mut world_gc = make_glider(6);
         let mut world_no_gc = make_glider(6);
 
-        world_gc.next(0);
-        world_no_gc.next(0);
+        world_gc.set_k(0);
+        world_gc.next();
+        world_no_gc.set_k(0);
+        world_no_gc.next();
 
         let buf_before_gc = world_gc.buf.len();
         world_gc.gc();
@@ -904,8 +896,10 @@ mod test_gc {
         assert!(pop_after_gc < buf_before_gc,
             "GC should reduce live cell count: {pop_after_gc} < {buf_before_gc}");
 
-        world_gc.next(0);
-        world_no_gc.next(0);
+        world_gc.set_k(0);
+        world_gc.next();
+        world_no_gc.set_k(0);
+        world_no_gc.next();
 
         assert!(trees_equal(&world_gc, world_gc.root, &world_no_gc, world_no_gc.root),
             "GC should not affect computation results");
@@ -915,7 +909,8 @@ mod test_gc {
     fn test_gc_twice() {
         // GC twice in a row should be safe and idempotent
         let mut world = make_glider(6);
-        world.next(0);
+        world.set_k(0);
+        world.next();
 
         world.gc();
         let pop_first = world.hashpop;
@@ -928,10 +923,13 @@ mod test_gc {
 
         // Should still compute correctly after double GC
         let mut world_ref = make_glider(6);
-        world_ref.next(0);
-        world_ref.next(0);
+        world_ref.set_k(0);
+        world_ref.next();
+        world_ref.set_k(0);
+        world_ref.next();
 
-        world.next(0);
+        world.set_k(0);
+        world.next();
 
         assert!(trees_equal(&world, world.root, &world_ref, world_ref.root),
             "Double GC should not affect computation");
@@ -946,8 +944,10 @@ mod test_gc {
 
         world_gc.gc();
 
-        world_gc.next(0);
-        world_ref.next(0);
+        world_gc.set_k(0);
+        world_gc.next();
+        world_ref.set_k(0);
+        world_ref.next();
 
         assert!(trees_equal(&world_gc, world_gc.root, &world_ref, world_ref.root),
             "GC on fresh world should not affect subsequent computation");
@@ -970,8 +970,10 @@ mod test_gc {
 
         world_gc.gc();
 
-        world_gc.next(0);
-        world_ref.next(0);
+        world_gc.set_k(0);
+        world_gc.next();
+        world_ref.set_k(0);
+        world_ref.next();
 
         assert!(trees_equal(&world_gc, world_gc.root, &world_ref, world_ref.root),
             "GC after set() should not affect computation");
@@ -988,18 +990,22 @@ mod test_gc {
         let mut world_gc = make_glider(6);
         let mut world_no_gc = make_glider(6);
 
-        world_gc.next(0);
-        world_no_gc.next(0);
+        world_gc.set_k(0);
+        world_gc.next();
+        world_no_gc.set_k(0);
+        world_no_gc.next();
 
         world_gc.gc();
 
         // Measure second step on both
         reset_compute_count();
-        world_no_gc.next(0);
+        world_no_gc.set_k(0);
+        world_no_gc.next();
         let count_no_gc = get_compute_count();
 
         reset_compute_count();
-        world_gc.next(0);
+        world_gc.set_k(0);
+        world_gc.next();
         let count_gc = get_compute_count();
 
         eprintln!("compute calls — with GC: {count_gc}, without GC: {count_no_gc}");

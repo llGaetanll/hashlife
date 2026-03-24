@@ -406,7 +406,8 @@ mod test_next {
         let cell16 = Cell::new(nw_idx, ne_idx, sw_idx, se_idx);
         let mut world = World::from_parts(B3S23, buf, cell16, 4);
 
-        let result_idx = world.compute_k(world.root, 0, 4);
+        world.set_k(0);
+        let result_idx = world.compute(world.root, 4);
         let result = world.buf[result_idx];
 
         let expected = Cell::leaf(0b0000_0001_0101_0011, 0, 0, 0);
@@ -434,12 +435,14 @@ mod test_next {
 
         // Full
         let mut world_full = World::from_parts(B3S23, buf.clone(), cell16, 4);
-        let full_idx = world_full.compute_k(world_full.root, 0, 4);
+        world_full.set_k(0);
+        let full_idx = world_full.compute(world_full.root, 4);
         let full_result = world_full.buf[full_idx];
 
         // Half
         let mut world_half = World::from_parts(B3S23, buf, cell16, 4);
-        let half_idx = world_half.compute_k(world_half.root, 1, 4);
+        world_half.set_k(1);
+        let half_idx = world_half.compute(world_half.root, 4);
         let result = world_half.buf[half_idx];
 
         // Visualize
@@ -504,12 +507,14 @@ mod test_next {
 
         // Full
         let mut world_full = World::from_parts(B3S23, buf.clone(), cell32, 5);
-        let full_idx = world_full.compute_k(world_full.root, 0, 5);
+        world_full.set_k(0);
+        let full_idx = world_full.compute(world_full.root, 5);
         let full_result = world_full.buf[full_idx];
 
         // Half
         let mut world_half = World::from_parts(B3S23, buf, cell32, 5);
-        let half_idx = world_half.compute_k(world_half.root, 1, 5);
+        world_half.set_k(1);
+        let half_idx = world_half.compute(world_half.root, 5);
         let result = world_half.buf[half_idx];
 
         let mut cam = CameraBlock::new(16, 8);
@@ -571,10 +576,11 @@ mod test_next {
     }
 
     /// Step forward by `n` single steps, returning the raw compute result index.
-    /// Each step does compute_k(k=1) then grow, except the last which skips the grow.
+    /// Each step does compute(k=1) then grow, except the last which skips the grow.
     fn step_n_times(world: &mut World, n: usize) {
+        world.set_k(1);
         for i in 0..n {
-            let idx = world.compute_k(world.root, 1, world.depth);
+            let idx = world.compute(world.root, world.depth);
             world.depth -= 1;
             if i < n - 1 {
                 world.root = idx;
@@ -590,7 +596,8 @@ mod test_next {
     fn test_next_k_32cell_k2_is_2_steps() {
         // next_k(2, 5) should give 2 steps
         let mut world_k = make_glider_32();
-        let k2_idx = world_k.compute_k(world_k.root, 2, 5);
+        world_k.set_k(2);
+        let k2_idx = world_k.compute(world_k.root, 5);
         let k2_render = render_cell(world_k.buf[k2_idx], &world_k.buf, 4);
 
         // 2x single steps for ground truth
@@ -613,8 +620,10 @@ mod test_next {
         let mut w1 = make_glider_32();
         let mut w2 = make_glider_32();
 
-        let k3 = w1.compute_k(w1.root, 3, 5);
-        let k0 = w2.compute_k(w2.root, 0, 5);
+        w1.set_k(3);
+        let k3 = w1.compute(w1.root, 5);
+        w2.set_k(0);
+        let k0 = w2.compute(w2.root, 5);
 
         assert_eq!(w1.buf[k3], w2.buf[k0],
             "\n32-cell: next_k(3) should equal next_k(0) (both full)\n  k3: {:?}\n  k0: {:?}",
@@ -658,7 +667,8 @@ mod test_next {
     fn test_next_k_64cell_k2_is_2_steps() {
         // next_k(2, 6) should give 2 steps
         let mut world_k = make_glider_64();
-        let k2_idx = world_k.compute_k(world_k.root, 2, 6);
+        world_k.set_k(2);
+        let k2_idx = world_k.compute(world_k.root, 6);
         let k2_render = render_cell(world_k.buf[k2_idx], &world_k.buf, 5);
 
         // 2x single steps for ground truth
@@ -719,7 +729,8 @@ mod test_hash {
             let mut world = make_glider(depth);
 
             reset_compute_count();
-            world.next(0);
+            world.set_k(0);
+            world.next();
             let count = get_compute_count();
 
             eprintln!(

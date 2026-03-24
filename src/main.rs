@@ -94,7 +94,7 @@ fn run(
 
             Action::World(a) => {
                 match a {
-                    WorldAction::Step => world.next(1),
+                    WorldAction::Step => world.next(),
                 }
             }
         }
