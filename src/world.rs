@@ -54,19 +54,20 @@ impl World {
     pub fn new(rule: RuleSet) -> Self {
         let rules = rule.compute_rules();
 
-        // First cell is the canonical void cell, second is the root, an uninitialized leaf
-        let buf = vec![Cell::void(), Cell::leaf_uninit()];
+        // First cell is the canonical void cell (index 0, not in hash table)
+        let buf = vec![Cell::void()];
 
-        let root = 1;
-
-        Self {
+        let mut world = Self {
             rules,
-            root,
+            root: 0,
             buf,
             depth: 3,
             hashtab: vec![0; INITIAL_HASH_SIZE],
             hashpop: 0,
-        }
+        };
+
+        world.root = world.find_leaf(0, 0, 0, 0);
+        world
     }
 
     /// Create a world from pre-built parts (for testing)
@@ -150,31 +151,23 @@ impl World {
     fn grow_cell(&mut self, idx: usize) -> usize {
         let cell = self.buf[idx];
 
-        let (nw, ne, sw, se) = if cell.is_leaf() {
+        let (nw_idx, ne_idx, sw_idx, se_idx) = if cell.is_leaf() {
             (
-                Cell::leaf(0, 0, 0, (cell.nw & !LEAF_MASK) as u16),
-                Cell::leaf(0, 0, cell.ne as u16, 0),
-                Cell::leaf(0, cell.sw as u16, 0, 0),
-                Cell::leaf(cell.se as u16, 0, 0, 0),
+                self.find_leaf(0, 0, 0, (cell.nw & !LEAF_MASK) as u16),
+                self.find_leaf(0, 0, cell.ne as u16, 0),
+                self.find_leaf(0, cell.sw as u16, 0, 0),
+                self.find_leaf(cell.se as u16, 0, 0, 0),
             )
         } else {
             (
-                Cell::new(0, 0, 0, cell.nw),
-                Cell::new(0, 0, cell.ne, 0),
-                Cell::new(0, cell.sw, 0, 0),
-                Cell::new(cell.se, 0, 0, 0),
+                self.find_node(0, 0, 0, cell.nw),
+                self.find_node(0, 0, cell.ne, 0),
+                self.find_node(0, cell.sw, 0, 0),
+                self.find_node(cell.se, 0, 0, 0),
             )
         };
 
-        let nw_idx = self.buf.len(); self.buf.push(nw);
-        let ne_idx = self.buf.len(); self.buf.push(ne);
-        let sw_idx = self.buf.len(); self.buf.push(sw);
-        let se_idx = self.buf.len(); self.buf.push(se);
-
-        let grown = Cell::new(nw_idx, ne_idx, sw_idx, se_idx);
-        let grown_idx = self.buf.len();
-        self.buf.push(grown);
-        grown_idx
+        self.find_node(nw_idx, ne_idx, sw_idx, se_idx)
     }
 
     /// Find or create a cell (dispatches to find_node or find_leaf)
@@ -657,62 +650,69 @@ impl World {
             y
         );
 
-        self.set_bit(root, x, y, self.depth);
+        self.root = self.set_bit(root, x, y, self.depth);
     }
 
-    fn set_bit(&mut self, ptr: usize, x: WorldOffset, y: WorldOffset, depth: u8) {
+    /// Set a bit in the tree, returning the new root index for this subtree.
+    /// Does not mutate existing cells — rebuilds the path with canonical nodes.
+    fn set_bit(&mut self, ptr: usize, x: WorldOffset, y: WorldOffset, depth: u8) -> usize {
         assert!(depth >= 3);
 
         if depth == 3 {
-            // Leaf
-            let cell = &mut self.buf[ptr];
-
-            let quad = Self::get_quadrant_mut(cell, x, y);
-            *quad |= 1 << (3 - (x & 3) + 4 * (y & 3));
-        } else {
-            // Non-leaf
+            // Leaf: read, modify the relevant quadrant, create new canonical leaf
             let cell = self.buf[ptr];
-            let quad = Self::get_quadrant(cell, x, y);
+            let mut nw = (cell.nw & !LEAF_MASK) as u16;
+            let mut ne = cell.ne as u16;
+            let mut sw = cell.sw as u16;
+            let mut se = cell.se as u16;
+
+            let bit = 1 << (3 - (x & 3) + 4 * (y & 3));
+            let quad = Self::get_quadrant_mut_u16(&mut nw, &mut ne, &mut sw, &mut se, x, y);
+            *quad |= bit;
+
+            self.find_leaf(nw, ne, sw, se)
+        } else {
+            // Non-leaf: recurse into the appropriate child, rebuild this node
+            let cell = self.buf[ptr];
+            let mut children = [cell.nw, cell.ne, cell.sw, cell.se];
+            let child_idx = Self::quadrant_index(x, y);
+            let child = children[child_idx];
 
             let w = 1 << depth;
-            let f = |c| c - if c < 0 { -(w >> 2) } else { w >> 2 };
+            let f = |c: WorldOffset| c - if c < 0 { -(w >> 2) } else { w >> 2 };
 
-            // We're pointing at nothing
-            if quad == 0 {
-                // Depth 4 means our child should be a leaf
-                let new_child_ptr = if depth == 4 {
-                    self.add_leaf()
-                } else {
-                    self.add_node()
-                };
-
-                let cell = &mut self.buf[ptr];
-
-                let quad = Self::get_quadrant_mut(cell, x, y);
-                *quad = new_child_ptr;
-
-                self.set_bit(new_child_ptr, f(x), f(y), depth - 1)
+            // Create empty child if needed
+            let child = if child == 0 {
+                if depth == 4 { self.add_leaf() } else { self.add_node() }
             } else {
-                self.set_bit(quad, f(x), f(y), depth - 1)
-            }
+                child
+            };
+
+            children[child_idx] = self.set_bit(child, f(x), f(y), depth - 1);
+            self.find_node(children[0], children[1], children[2], children[3])
         }
     }
 
-    #[allow(clippy::collapsible_else_if)]
-    fn get_quadrant(cell: Cell, x: i128, y: i128) -> usize {
-        if x < 0 {
-            if y < 0 { cell.sw } else { cell.nw }
-        } else {
-            if y < 0 { cell.se } else { cell.ne }
+    /// Returns which quadrant index (0=nw, 1=ne, 2=sw, 3=se) a coordinate falls in
+    fn quadrant_index(x: WorldOffset, y: WorldOffset) -> usize {
+        match (x >= 0, y < 0) {
+            (false, false) => 0, // nw
+            (true, false)  => 1, // ne
+            (false, true)  => 2, // sw
+            (true, true)   => 3, // se
         }
     }
 
-    #[allow(clippy::collapsible_else_if)]
-    fn get_quadrant_mut(cell: &mut Cell, x: i128, y: i128) -> &mut usize {
-        if x < 0 {
-            if y < 0 { &mut cell.sw } else { &mut cell.nw }
-        } else {
-            if y < 0 { &mut cell.se } else { &mut cell.ne }
+    /// Get a mutable reference to the appropriate u16 quadrant
+    fn get_quadrant_mut_u16<'a>(
+        nw: &'a mut u16, ne: &'a mut u16, sw: &'a mut u16, se: &'a mut u16,
+        x: WorldOffset, y: WorldOffset,
+    ) -> &'a mut u16 {
+        match Self::quadrant_index(x, y) {
+            0 => nw,
+            1 => ne,
+            2 => sw,
+            _ => se,
         }
     }
 
@@ -741,21 +741,13 @@ impl World {
         }
     }
 
-    /// Add a leaf cell to the world and return its index
+    /// Add an empty leaf cell to the world and return its index
     fn add_leaf(&mut self) -> usize {
-        let n = self.buf.len();
-
-        self.buf.push(Cell::leaf_uninit());
-
-        n
+        self.find_leaf(0, 0, 0, 0)
     }
 
-    /// Add a non-leaf cell to the world and return its index
+    /// Add an empty non-leaf cell to the world and return its index
     fn add_node(&mut self) -> usize {
-        let n = self.buf.len();
-
-        self.buf.push(Cell::uninit());
-
-        n
+        self.find_node(0, 0, 0, 0)
     }
 }
