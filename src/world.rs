@@ -98,7 +98,7 @@ impl World {
     pub fn next(&mut self) {
         let mut root = self.buf[self.root];
 
-        self.root = root.next_nophase2(&self.rules, &mut self.buf);
+        self.root = root.next_half(&self.rules, &mut self.buf);
         self.depth -= 1;
 
         self.grow(1);
