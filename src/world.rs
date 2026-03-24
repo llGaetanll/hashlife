@@ -4,7 +4,7 @@ use crate::rule_set::RuleSet;
 use crate::{info_log, trace_log};
 
 use crate::WorldOffset;
-use crate::cell::{Cell, GC_UNREACHABLE, HASH_CHAIN_END, LEAF_MASK, RES_UNSET_MASK, bump_compute_count, cell_utils};
+use crate::cell::{Cell, GC_UNREACHABLE, HASH_CHAIN_END, LEAF_MASK, RES_UNSET_MASK, VOID_MASK, bump_compute_count, cell_utils};
 
 const INITIAL_HASH_SIZE: usize = 1021;
 
@@ -168,7 +168,7 @@ impl World {
         }
         self.k = k;
         for cell in &mut self.buf {
-            cell.res = RES_UNSET_MASK;
+            cell.res = RES_UNSET_MASK | (cell.res & VOID_MASK);
         }
     }
 
@@ -272,6 +272,19 @@ impl World {
         // Not found — insert
         let new_idx = self.buf.len();
         let mut cell = cell;
+
+        // Set the void bit if all children are void.
+        // For the bootstrap case (buf empty, all children 0), this is trivially true.
+        let all_void = if self.buf.is_empty() {
+            nw == 0 && ne == 0 && sw == 0 && se == 0
+        } else {
+            self.buf[nw].is_void() && self.buf[ne].is_void()
+                && self.buf[sw].is_void() && self.buf[se].is_void()
+        };
+        if all_void {
+            cell.res |= VOID_MASK;
+        }
+
         cell.next_hash = self.hashtab[h];
         self.buf.push(cell);
         self.hashtab[h] = new_idx;
@@ -370,18 +383,19 @@ impl World {
 
         let cell = self.buf[idx];
 
-        if !cell.is_void() && !cell.is_leaf() {
+        if !cell.is_leaf() {
             // Recurse into children
             self.gc_mark(cell.nw);
             self.gc_mark(cell.ne);
             self.gc_mark(cell.sw);
             self.gc_mark(cell.se);
-        }
 
-        // Mark cached result if present.
-        // Leaf results are u16 rules (not buf indices), so skip those.
-        if !cell.is_leaf() && cell.res != RES_UNSET_MASK {
-            self.gc_mark(cell.res);
+            // Mark cached result if present.
+            // Leaf results are u16 rules (not buf indices), so skip those.
+            let res = cell.res & !VOID_MASK;
+            if res & RES_UNSET_MASK == 0 {
+                self.gc_mark(res);
+            }
         }
     }
 
@@ -393,9 +407,10 @@ impl World {
         bump_compute_count();
         let cell = self.buf[idx];
 
-        // Check result cache
-        if cell.res != RES_UNSET_MASK {
-            return cell.res;
+        // Check result cache (mask off VOID_MASK which is metadata, not part of the result)
+        let cached = cell.res & !VOID_MASK;
+        if cached & RES_UNSET_MASK == 0 {
+            return cached;
         }
 
         let k = self.k;
@@ -426,7 +441,7 @@ impl World {
             self.find_cell(result)
         };
 
-        self.buf[idx].res = res;
+        self.buf[idx].res = res | (self.buf[idx].res & VOID_MASK);
         res
     }
 

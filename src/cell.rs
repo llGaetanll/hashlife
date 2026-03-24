@@ -16,21 +16,20 @@ pub fn bump_compute_count() {
     COMPUTE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// On 64 bit machines: 1 followed by 63 0s, `9_223_372_036_854_775_808`.
-/// On 32 bit machines: 1 followed by 31 0s, `2_147_483_648`.
+const WORD_SIZE_BITS: usize = std::mem::size_of::<usize>() * 8;
+
+/// MSB of `nw`: marks the cell as a leaf (8x8 grid with u16 rules in each quadrant).
 ///
-/// We make an important assumption here, that our memory buffer will never contain this many
-/// entries. Under this assumption, we can use the most significant bit of our `nw` index to
-/// indicate whether the current cell is a leaf. This keeps the structure small, and the routine
-/// fast.
-pub const LEAF_MASK: usize = {
-    const WORD_SIZE_BITS: usize = std::mem::size_of::<usize>() * 8;
+/// We assume the memory buffer will never contain 2^63 (or 2^31) entries,
+/// so the most significant bit is free to use as a tag.
+pub const LEAF_MASK: usize = 1usize << (WORD_SIZE_BITS - 1);
 
-    1usize << (WORD_SIZE_BITS - 1)
-};
-
-/// If we see a leading bit on `res`, that means the result is not computed
+/// MSB of `res`: marks the cached result as not yet computed.
 pub const RES_UNSET_MASK: usize = LEAF_MASK;
+
+/// Second-highest bit of `res`: marks a cell as void (contains no live cells).
+/// A leaf is void when all 4 rules are zero. A node is void when all 4 children are void.
+pub const VOID_MASK: usize = 1usize << (WORD_SIZE_BITS - 2);
 
 /// Sentinel value for "end of hash chain" — can never be a valid buf index
 pub const HASH_CHAIN_END: usize = usize::MAX;
@@ -56,35 +55,31 @@ pub struct Cell {
 }
 
 impl Cell {
-    /// Return the canonical "empty" cell. This is the same as an `uninit` cell, but has with
-    /// different semantics.
-    ///
-    /// NOTE: A void cell is *not* tagged with the leaf mask. Cells of any size
-    /// can point to a void cell if any of their quadrants happen to be empty
+    /// Return the canonical "empty" cell (the base void node at buf index 0).
     pub const fn void() -> Self {
-        Self::uninit()
-    }
-
-    /// Return an unset cell
-    pub const fn uninit() -> Self {
         Self {
             nw: 0,
             ne: 0,
             sw: 0,
             se: 0,
-            res: RES_UNSET_MASK,
+            res: RES_UNSET_MASK | VOID_MASK,
             next_hash: HASH_CHAIN_END,
         }
     }
 
     /// Create a new leaf node given 4 rules
     pub const fn leaf(nw: u16, ne: u16, sw: u16, se: u16) -> Self {
+        let void_bit = if nw == 0 && ne == 0 && sw == 0 && se == 0 {
+            VOID_MASK
+        } else {
+            0
+        };
         Self {
             nw: nw as usize | LEAF_MASK,
             ne: ne as usize,
             sw: sw as usize,
             se: se as usize,
-            res: RES_UNSET_MASK,
+            res: RES_UNSET_MASK | void_bit,
             next_hash: HASH_CHAIN_END,
         }
     }
@@ -113,11 +108,10 @@ impl Cell {
         }
     }
 
-    /// Check if the cell is void.
-    ///
-    /// Note that this is different from a cell being a leaf
+    /// Check if the cell is void (contains no live cells).
+    /// This works at any depth — leaves, nodes, and the base void cell.
     pub fn is_void(&self) -> bool {
-        *self == Cell::void()
+        self.res & VOID_MASK != 0
     }
 
     /// Check if the cell is a leaf.
@@ -335,7 +329,9 @@ mod test_next {
         dx: CellOffset,
         dy: CellOffset,
     ) {
-        if cell.is_leaf() {
+        if cell.is_void() {
+            /* No live cells */
+        } else if cell.is_leaf() {
             draw_leaf(cam, cell, dx, dy);
         } else {
             assert!(depth > 0, "Expected non-zero depth for non-leaf node");
