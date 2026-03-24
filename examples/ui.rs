@@ -15,7 +15,7 @@ use crossterm::event::KeyModifiers;
 use crossterm::execute;
 use crossterm::style;
 use crossterm::terminal;
-use hashlife::camera::CameraBraille;
+use hashlife::camera::{Camera, CameraBraille};
 use hashlife::rle_data::RleBuffer;
 use hashlife::rle_file;
 use hashlife::world::World;

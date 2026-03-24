@@ -3,20 +3,30 @@ mod keymap;
 
 use std::io::{self, Write};
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use crossterm::{cursor, event, execute, style, terminal};
 
-use hashlife::camera::CameraBraille;
+use hashlife::camera::{Camera, CameraBlock, CameraBraille};
 use hashlife::rle_data::RleBuffer;
 use hashlife::rle_file;
 use hashlife::world::World;
 
 use action::{Action, AppAction, CameraAction, WorldAction};
 
+#[derive(Clone, ValueEnum)]
+enum CameraArg {
+    Braille,
+    Block,
+}
+
 #[derive(Parser)]
 struct Args {
     /// Path to an RLE file
     path: String,
+
+    /// Camera rendering mode
+    #[arg(long, default_value = "braille")]
+    camera: CameraArg,
 }
 
 fn load_rle(path: &str) -> anyhow::Result<World> {
@@ -32,7 +42,11 @@ fn main() -> anyhow::Result<()> {
     let mut world = load_rle(&args.path)?;
     world.grow(2);
     let (cols, rows) = terminal::size()?;
-    let mut cam = CameraBraille::new(cols, rows);
+
+    let mut cam: Box<dyn Camera> = match args.camera {
+        CameraArg::Braille => Box::new(CameraBraille::new(cols, rows)),
+        CameraArg::Block => Box::new(CameraBlock::new(cols, rows)),
+    };
 
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -41,9 +55,9 @@ fn main() -> anyhow::Result<()> {
     // Initial draw
     cam.reset();
     cam.draw(&world);
-    render(&mut stdout, &mut cam)?;
+    render(&mut stdout, cam.as_mut())?;
 
-    let result = run(&mut stdout, &mut cam, &mut world);
+    let result = run(&mut stdout, cam.as_mut(), &mut world);
 
     execute!(stdout, terminal::LeaveAlternateScreen, cursor::Show)?;
     terminal::disable_raw_mode()?;
@@ -53,7 +67,7 @@ fn main() -> anyhow::Result<()> {
 
 fn run(
     stdout: &mut io::Stdout,
-    cam: &mut CameraBraille,
+    cam: &mut dyn Camera,
     world: &mut World,
 ) -> anyhow::Result<()> {
     loop {
@@ -93,7 +107,7 @@ fn run(
     Ok(())
 }
 
-fn render(stdout: &mut io::Stdout, cam: &mut CameraBraille) -> anyhow::Result<()> {
+fn render(stdout: &mut io::Stdout, cam: &mut dyn Camera) -> anyhow::Result<()> {
     let s = cam.render();
 
     execute!(

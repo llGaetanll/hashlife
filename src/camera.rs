@@ -1,15 +1,27 @@
-use crate::CellOffset;
-use crate::ScreenSize;
-use crate::WorldOffset;
 use crate::cell::Cell;
 use crate::cell::LEAF_MASK;
 use crate::world::World;
+use crate::CellOffset;
+use crate::ScreenSize;
+use crate::WorldOffset;
 
 pub trait Camera {
     fn draw_pixel(&mut self, x: CellOffset, y: CellOffset);
 
     /// Pixel dimensions of the cell buffer (not terminal columns/rows)
     fn pixel_size(&self) -> (CellOffset, CellOffset);
+
+    fn move_left(&mut self, n: u64);
+    fn move_right(&mut self, n: u64);
+    fn move_up(&mut self, n: u64);
+    fn move_down(&mut self, n: u64);
+    fn zoom_in(&mut self);
+    fn zoom_out(&mut self);
+    fn reset_view(&mut self);
+    fn resize(&mut self, w: ScreenSize, h: ScreenSize);
+    fn draw(&mut self, world: &World);
+    fn reset(&mut self);
+    fn render(&mut self) -> &str;
 }
 
 /// Hex values of braille dots
@@ -77,6 +89,127 @@ impl Camera for CameraBraille {
     fn pixel_size(&self) -> (CellOffset, CellOffset) {
         (2 * self.w as CellOffset, 4 * self.h as CellOffset)
     }
+
+    fn move_left(&mut self, n: u64) {
+        let dx = 2i128.pow(self.scale as u32);
+        self.x += dx * n as i128;
+    }
+
+    fn move_right(&mut self, n: u64) {
+        let dx = 2i128.pow(self.scale as u32);
+        self.x -= dx * n as i128;
+    }
+
+    fn move_up(&mut self, n: u64) {
+        let dy = 2i128.pow(self.scale as u32);
+        self.y += dy * n as i128;
+    }
+
+    fn move_down(&mut self, n: u64) {
+        let dy = 2i128.pow(self.scale as u32);
+        self.y -= dy * n as i128;
+    }
+
+    fn reset_view(&mut self) {
+        self.scale = 0;
+        self.x = 0;
+        self.y = 0;
+    }
+
+    fn resize(&mut self, w: ScreenSize, h: ScreenSize) {
+        self.w = w;
+        self.h = h;
+
+        let (w, h) = (w as usize, h as usize);
+
+        self.cb.clear();
+        self.cb.resize(w * h * 8, false); // We get 8 cells per character using braille
+
+        self.fb.clear();
+
+        self.cp.clear();
+        self.cp.resize(w * h, BRAILLE_EMPTY);
+    }
+
+    fn draw(&mut self, world: &World) {
+        let buf = &world.buf;
+        let root = world.root;
+        let cell = buf[root];
+        let n = world.depth as u32;
+        let scale = self.scale as u32;
+
+        // TODO: Always drawing from the world root is wasteful. Figure out largest node larger
+        // than the screen view instead
+
+        // dx and dy here are screen pixel offsets.
+        // Since self.x and self.y encode true position, we need to divide them by 2^scale
+        let (dx, dy) = (self.x >> self.scale, self.y >> self.scale);
+
+        draw_cell(
+            self,
+            buf,
+            cell,
+            dx as CellOffset,
+            dy as CellOffset,
+            n,
+            scale,
+        );
+    }
+
+    fn zoom_in(&mut self) {
+        if self.scale == 0 {
+            return;
+        }
+
+        self.move_right(self.w as u64 / 2);
+        self.move_down(self.h as u64);
+
+        self.scale -= 1;
+    }
+
+    fn zoom_out(&mut self) {
+        self.scale += 1;
+
+        self.move_left(self.w as u64 / 2);
+        self.move_up(self.h as u64);
+    }
+
+    fn reset(&mut self) {
+        self.cb.fill(false);
+    }
+
+    fn render(&mut self) -> &str {
+        // compute new codepoints
+        self.cp.fill(BRAILLE_EMPTY);
+
+        let wid = 2 * self.w as usize; // Width of cell buffer
+        for (n, &px) in self.cb.iter().enumerate() {
+            if px {
+                let (x, y) = Self::coords_to(n, wid);
+                let i = (y / 4) * self.w + (x / 2);
+
+                let hex = Self::get_hex_value(x, y);
+
+                self.cp[i as usize] += hex;
+            }
+        }
+
+        // update framebuffer
+        self.fb.clear();
+
+        // Update the frame buffer
+        let w = self.w as usize;
+        for (i, &c) in self.cp.iter().enumerate() {
+            if i > 0 && i % w == 0 {
+                self.fb.push('\n');
+            }
+
+            self.fb.push(::std::char::from_u32(c).unwrap());
+        }
+        self.fb.push('\n');
+
+        &self.fb
+    }
 }
 
 impl CameraBraille {
@@ -133,92 +266,6 @@ impl CameraBraille {
         self.h
     }
 
-    pub fn move_left(&mut self, n: u64) {
-        let dx = 2i128.pow(self.scale as u32);
-        self.x += dx * n as i128;
-    }
-
-    pub fn move_right(&mut self, n: u64) {
-        let dx = 2i128.pow(self.scale as u32);
-        self.x -= dx * n as i128;
-    }
-
-    pub fn move_up(&mut self, n: u64) {
-        let dy = 2i128.pow(self.scale as u32);
-        self.y += dy * n as i128;
-    }
-
-    pub fn move_down(&mut self, n: u64) {
-        let dy = 2i128.pow(self.scale as u32);
-        self.y -= dy * n as i128;
-    }
-
-    pub fn reset_view(&mut self) {
-        self.scale = 0;
-        self.x = 0;
-        self.y = 0;
-    }
-
-    /// Resize the camera to `w` columns wide, and `h` columns tall
-    pub fn resize(&mut self, w: ScreenSize, h: ScreenSize) {
-        self.w = w;
-        self.h = h;
-
-        let (w, h) = (w as usize, h as usize);
-
-        self.cb.clear();
-        self.cb.resize(w * h * 8, false); // We get 8 cells per character using braille
-
-        self.fb.clear();
-
-        self.cp.clear();
-        self.cp.resize(w * h, BRAILLE_EMPTY);
-    }
-
-    /// Draw a [`World`] onto the cell buffer
-    pub fn draw(&mut self, world: &World) {
-        let buf = &world.buf;
-        let root = world.root;
-        let cell = buf[root];
-        let n = world.depth as u32;
-        let scale = self.scale as u32;
-
-        // TODO: Always drawing from the world root is wasteful. Figure out largest node larger
-        // than the screen view instead
-
-        // dx and dy here are screen pixel offsets.
-        // Since self.x and self.y encode true position, we need to divide them by 2^scale
-        let (dx, dy) = (self.x >> self.scale, self.y >> self.scale);
-
-        draw_cell(
-            self,
-            buf,
-            cell,
-            dx as CellOffset,
-            dy as CellOffset,
-            n,
-            scale,
-        );
-    }
-
-    pub fn zoom_in(&mut self) {
-        if self.scale == 0 {
-            return;
-        }
-
-        self.move_right(self.w as u64 / 2);
-        self.move_down(self.h as u64);
-
-        self.scale -= 1;
-    }
-
-    pub fn zoom_out(&mut self) {
-        self.scale += 1;
-
-        self.move_left(self.w as u64 / 2);
-        self.move_up(self.h as u64);
-    }
-
     pub fn draw_outline(&mut self) {
         // Cell width and height
         let (cw, ch) = (self.w * 2, self.h * 4);
@@ -251,49 +298,11 @@ impl CameraBraille {
         self.rect_set(x, y, s, false)
     }
 
-    /// Reset the cell buffer
-    pub fn reset(&mut self) {
-        self.cb.fill(false);
-    }
-
     /// Invert all pixels in the cell buffer
     pub fn invert(&mut self) {
         for px in self.cb.iter_mut() {
             *px = !*px;
         }
-    }
-
-    pub fn render(&mut self) -> &str {
-        // compute new codepoints
-        self.cp.fill(BRAILLE_EMPTY);
-
-        let wid = 2 * self.w as usize; // Width of cell buffer
-        for (n, &px) in self.cb.iter().enumerate() {
-            if px {
-                let (x, y) = Self::coords_to(n, wid);
-                let i = (y / 4) * self.w + (x / 2);
-
-                let hex = Self::get_hex_value(x, y);
-
-                self.cp[i as usize] += hex;
-            }
-        }
-
-        // update framebuffer
-        self.fb.clear();
-
-        // Update the frame buffer
-        let w = self.w as usize;
-        for (i, &c) in self.cp.iter().enumerate() {
-            if i > 0 && i % w == 0 {
-                self.fb.push('\n');
-            }
-
-            self.fb.push(::std::char::from_u32(c).unwrap());
-        }
-        self.fb.push('\n');
-
-        &self.fb
     }
 
     /// Set a (saturating) rectangle of the cell buffer to a value. Either true, or false.
@@ -389,6 +398,117 @@ impl Camera for CameraBlock {
     fn pixel_size(&self) -> (CellOffset, CellOffset) {
         (self.w as CellOffset, 2 * self.h as CellOffset)
     }
+
+    fn move_left(&mut self, n: u64) {
+        let dx = 2i128.pow(self.scale as u32);
+        self.x += dx * n as i128;
+    }
+
+    fn move_right(&mut self, n: u64) {
+        let dx = 2i128.pow(self.scale as u32);
+        self.x -= dx * n as i128;
+    }
+
+    fn move_up(&mut self, n: u64) {
+        let dy = 2i128.pow(self.scale as u32);
+        self.y += dy * n as i128;
+    }
+
+    fn move_down(&mut self, n: u64) {
+        let dy = 2i128.pow(self.scale as u32);
+        self.y -= dy * n as i128;
+    }
+
+    fn reset_view(&mut self) {
+        self.scale = 0;
+        self.x = 0;
+        self.y = 0;
+    }
+
+    fn resize(&mut self, w: ScreenSize, h: ScreenSize) {
+        self.w = w;
+        self.h = h;
+
+        let (w, h) = (w as usize, h as usize);
+
+        self.cb.clear();
+        self.cb.resize(w * h * 2, false); // We get 2 cells per character using half-blocks
+
+        self.fb.clear();
+    }
+
+    fn draw(&mut self, world: &World) {
+        let buf = &world.buf;
+        let root = world.root;
+        let cell = buf[root];
+        let n = world.depth as u32;
+        let scale = self.scale as u32;
+
+        let (dx, dy) = (self.x >> self.scale, self.y >> self.scale);
+
+        draw_cell(
+            self,
+            buf,
+            cell,
+            dx as CellOffset,
+            dy as CellOffset,
+            n,
+            scale,
+        );
+    }
+
+    fn zoom_in(&mut self) {
+        if self.scale == 0 {
+            return;
+        }
+
+        self.move_right(self.w as u64 / 2);
+        self.move_down(self.h as u64);
+
+        self.scale -= 1;
+    }
+
+    fn zoom_out(&mut self) {
+        self.scale += 1;
+
+        self.move_left(self.w as u64 / 2);
+        self.move_up(self.h as u64);
+    }
+
+    fn reset(&mut self) {
+        self.cb.fill(false);
+    }
+
+    fn render(&mut self) -> &str {
+        self.fb.clear();
+
+        let w = self.w as usize;
+        for row in 0..self.h as usize {
+            if row > 0 {
+                self.fb.push('\n');
+            }
+
+            let top_y = row * 2;
+            let bot_y = row * 2 + 1;
+
+            for col in 0..w {
+                let top = self.cb[top_y * w + col];
+                let bot = self.cb[bot_y * w + col];
+
+                let ch = match (top, bot) {
+                    (false, false) => ' ',
+                    (true, false) => '\u{2580}',
+                    (false, true) => '\u{2584}',
+                    (true, true) => '\u{2588}',
+                };
+
+                self.fb.push(ch);
+            }
+        }
+        self.fb.push('\n');
+
+        &self.fb
+    }
 }
 
 impl CameraBlock {
@@ -425,84 +545,6 @@ impl CameraBlock {
         self.h
     }
 
-    pub fn move_left(&mut self, n: u64) {
-        let dx = 2i128.pow(self.scale as u32);
-        self.x += dx * n as i128;
-    }
-
-    pub fn move_right(&mut self, n: u64) {
-        let dx = 2i128.pow(self.scale as u32);
-        self.x -= dx * n as i128;
-    }
-
-    pub fn move_up(&mut self, n: u64) {
-        let dy = 2i128.pow(self.scale as u32);
-        self.y += dy * n as i128;
-    }
-
-    pub fn move_down(&mut self, n: u64) {
-        let dy = 2i128.pow(self.scale as u32);
-        self.y -= dy * n as i128;
-    }
-
-    pub fn reset_view(&mut self) {
-        self.scale = 0;
-        self.x = 0;
-        self.y = 0;
-    }
-
-    /// Resize the camera to `w` columns wide, and `h` columns tall
-    pub fn resize(&mut self, w: ScreenSize, h: ScreenSize) {
-        self.w = w;
-        self.h = h;
-
-        let (w, h) = (w as usize, h as usize);
-
-        self.cb.clear();
-        self.cb.resize(w * h * 2, false); // We get 2 cells per character using half-blocks
-
-        self.fb.clear();
-    }
-
-    /// Draw a [`World`] onto the cell buffer
-    pub fn draw(&mut self, world: &World) {
-        let buf = &world.buf;
-        let root = world.root;
-        let cell = buf[root];
-        let n = world.depth as u32;
-        let scale = self.scale as u32;
-
-        let (dx, dy) = (self.x >> self.scale, self.y >> self.scale);
-
-        draw_cell(
-            self,
-            buf,
-            cell,
-            dx as CellOffset,
-            dy as CellOffset,
-            n,
-            scale,
-        );
-    }
-
-    pub fn zoom_in(&mut self) {
-        if self.scale == 0 {
-            return;
-        }
-
-        self.move_right(self.w as u64 / 2);
-        self.move_down(self.h as u64);
-
-        self.scale -= 1;
-    }
-
-    pub fn zoom_out(&mut self) {
-        self.scale += 1;
-
-        self.move_left(self.w as u64 / 2);
-        self.move_up(self.h as u64);
-    }
-
     pub fn draw_outline(&mut self) {
         let (cw, ch) = (self.w, self.h * 2);
 
@@ -532,47 +574,11 @@ impl CameraBlock {
         self.rect_set(x, y, s, false)
     }
 
-    /// Reset the cell buffer
-    pub fn reset(&mut self) {
-        self.cb.fill(false);
-    }
-
     /// Invert all pixels in the cell buffer
     pub fn invert(&mut self) {
         for px in self.cb.iter_mut() {
             *px = !*px;
         }
-    }
-
-    pub fn render(&mut self) -> &str {
-        self.fb.clear();
-
-        let w = self.w as usize;
-        for row in 0..self.h as usize {
-            if row > 0 {
-                self.fb.push('\n');
-            }
-
-            let top_y = row * 2;
-            let bot_y = row * 2 + 1;
-
-            for col in 0..w {
-                let top = self.cb[top_y * w + col];
-                let bot = self.cb[bot_y * w + col];
-
-                let ch = match (top, bot) {
-                    (false, false) => ' ',
-                    (true, false) => '\u{2580}',
-                    (false, true) => '\u{2584}',
-                    (true, true) => '\u{2588}',
-                };
-
-                self.fb.push(ch);
-            }
-        }
-        self.fb.push('\n');
-
-        &self.fb
     }
 
     fn rect_set(&mut self, x: CellOffset, y: CellOffset, s: ScreenSize, v: bool) {
@@ -591,22 +597,6 @@ impl CameraBlock {
                 let i = yy as usize * w as usize + xx as usize;
                 self.cb[i] = v;
             }
-        }
-    }
-}
-
-pub enum CameraType {
-    Braille,
-    Block,
-}
-
-pub struct CameraBuilder;
-
-impl CameraBuilder {
-    pub fn build(ty: CameraType, w: u16, h: u16) -> Box<dyn Camera> {
-        match ty {
-            CameraType::Braille => Box::new(CameraBraille::new(w, h)),
-            CameraType::Block => Box::new(CameraBlock::new(w, h)),
         }
     }
 }

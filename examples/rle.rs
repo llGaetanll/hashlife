@@ -1,7 +1,7 @@
 use std::fs::read_to_string;
 use std::path::Path;
 
-use hashlife::camera::CameraBraille;
+use hashlife::camera::{Camera, CameraBraille};
 use hashlife::rle_data::RleBuffer;
 use hashlife::rle_file;
 use hashlife::rule_set::B3S23;

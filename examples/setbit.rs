@@ -1,4 +1,4 @@
-use hashlife::camera::CameraBraille;
+use hashlife::camera::{Camera, CameraBraille};
 use hashlife::rule_set::B3S23;
 use hashlife::world::World;
 
