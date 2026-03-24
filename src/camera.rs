@@ -7,6 +7,9 @@ use crate::world::World;
 
 pub trait Camera {
     fn draw_pixel(&mut self, x: CellOffset, y: CellOffset);
+
+    /// Pixel dimensions of the cell buffer (not terminal columns/rows)
+    fn pixel_size(&self) -> (CellOffset, CellOffset);
 }
 
 /// Hex values of braille dots
@@ -63,12 +66,16 @@ impl Camera for CameraBraille {
         let (w, h) = (2 * self.w as i32, 4 * self.h as i32);
 
         if x < 0 || y < 0 || x >= w || y >= h {
-            panic!("coordinate out of bounds: size is ({w}, {h}) but the coordinate is ({x}, {y})")
+            return;
         }
 
-        let i = Self::coords_from(x as ScreenSize, y as ScreenSize, w as usize); // Safe cast
+        let i = Self::coords_from(x as ScreenSize, y as ScreenSize, w as usize);
 
         self.cb[i] = true;
+    }
+
+    fn pixel_size(&self) -> (CellOffset, CellOffset) {
+        (2 * self.w as CellOffset, 4 * self.h as CellOffset)
     }
 }
 
@@ -372,11 +379,15 @@ impl Camera for CameraBlock {
         let (w, h) = (self.w as i32, 2 * self.h as i32);
 
         if x < 0 || y < 0 || x >= w || y >= h {
-            panic!("coordinate out of bounds: size is ({w}, {h}) but the coordinate is ({x}, {y})")
+            return;
         }
 
         let i = y as usize * w as usize + x as usize;
         self.cb[i] = true;
+    }
+
+    fn pixel_size(&self) -> (CellOffset, CellOffset) {
+        (self.w as CellOffset, 2 * self.h as CellOffset)
     }
 }
 
@@ -715,8 +726,15 @@ fn draw_cell(
         return;
     }
 
-    // The square width of a node
+    // The square width of a node in screen pixels
     let sw = 2u16.saturating_pow(n - scale);
+
+    // Cull if entirely off-screen
+    let (pw, ph) = cam.pixel_size();
+    let sw_i = sw as CellOffset;
+    if dx + sw_i <= 0 || dy + sw_i <= 0 || dx >= pw || dy >= ph {
+        return;
+    }
 
     // Empty 2^n cell
     if cell.is_void() {
