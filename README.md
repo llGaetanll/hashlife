@@ -114,13 +114,15 @@ result.
 
 ![So now we have this known 6x6 region after one generation...](assets/5-6cell_res.png)
 
-So now just one more phase of this clever 4x4 positioning, and we'll have the
-4 cell result for the 6 cell!
+The clever idea behind making this 6 cell is that we can decompose it into nine 2
+cells. If we do this, and we select adjacent 2 cells to form our 4 cells, we can
+compute their results and get a 2x2 center about *it*.
 
 ![...and now we can use it to compute these 2x2 results from the sub 4x4s!](assets/6-sub4x4s.png)
 
-But the resulting 4 cell we're looking for is just doing that 4 times with the
-right 4x4s.
+But the resulting 4 cell we're looking for is just doing that with the top left
+, the top right, bottom left, and bottom right 2x2s, we can just compute the
+results for each of those and merge those center 2x2s into a 4x4 result!
 
 ![Do that 4 times, and you have the result for an 8 cell!](assets/7-8cell_res.png)
 
