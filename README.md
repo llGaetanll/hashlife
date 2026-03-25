@@ -8,60 +8,112 @@ future, sometimes at no cost at all.
 
 ## How does it work?
 
-There are two parts to Hashlife that make it clever. The first is how we store
-the cells, and the second is re-using computation. We'll get to caching a bit
+There are three parts to Hashlife that make it clever. The first is how we store
+the cells, the second is computing future world states, and the third is
+re-using computation. We'll get to computing world states and memoization a bit
 later but let's first talk about how the cells are stored.
 
 ## How Hashlife stores the cells
 
-If you were to build a very simple program to compute Conway's game of life, it
+If you were to build a very simple program to compute Conway's Game of Life, it
 might seem natural to store the cells as a 2D array of boolean values. Cell `(x,
 y)` is alive if and only if `cells[x][y]` is `true`. Hashlife does not take this
 approach. Instead, Hashlife builds the world from increasingly large square
-cells. Start with a 1x1 cell (or a 1 cell), either dead or alive. Put 4 of
-these in a 2x2 square and you get a 2 cell. Put 4 of these in a square and you
-get a 4 cell, and so on... In Hashlife, the entire world is stored as a QuadTree
-of cells `2^k` on a side. To be more specific, a world that is `2^10 = 1024`
-cells on a side, can be decomposed as 4 cells `512` on a side. Each of those
-further decompose until we get back down to the 1 cell.
+cells. Start with a 1x1 cell (or a 1 cell), either dead or alive. Put 4 of these
+in a 2x2 square and you get a 2 cell. Put 4 of these in a square and you get a 4
+cell, and so on... In Hashlife, the entire world is stored as a QuadTree of
+cells $2^k$ on a side. To be more specific, a world that is $2^{10} = 1024$ cells
+on a side, can be decomposed as 4 cells `512` on a side. Each of those further
+decompose until we get back down to the 1 cell.
 
-In practice, we do not start at the 1 cell but at the 4 cell, as 4
-cells require exactly 16 bits of information, and store perfectly inside `u16`s.
-We then compose four `u16` "rules" to build a "leaf", or an 8 cell.
+In practice, we do not start at the 1 cell but at the 4 cell, as 4 cells require
+exactly 16 bits of information, and store perfectly inside `u16`s. We then
+compose four `u16` "rules" to build a "leaf", or an 8 cell.
 
 ## How Hashlife computes future world states
 
-So we understand how the algorithm stores the data, but so far we haven't at all
+So we understand how the algorithm stores the world, but so far we haven't at all
 explained how storing things this way allows us to compute Conway's Game of Life, let
 alone doing so efficiently.
 
-We start with our *rules* from earlier, the 4 cells. How can we compute the next state
-of this cell? The key observation to make is that, for a 4 cell, we can only
-really say anything about its 2x2 center, since the cells on the edges of the 4x4 
-depend on their neighbors, whose states we dont know. However the inner 2x2 we know for
-sure, we have all the neighbors needed to compute the next state.
+We start with our *rules* from earlier, the 4 cells. How can we compute the next
+state of this cell? The key observation to make is that, for a 4 cell, we can
+only really say anything about its 2x2 center, since the cells on the edges of
+the 4x4 depend on their neighbors, whose states we dont know. However the inner
+2x2, we know for sure. We have all the neighbors needed to compute the next
+state.
 
-Another neat fact is that there's not that many possible 4 cells, only 2^16 in fact!
-A fun trick here is that we can compute the next state of all 4 cells. In fact we
-can store the result in an array where `arr[i]` is the resulting 2x2 for the 4 cell
-represented by the number `i` (recall that we can just store 4 cells as `u16`s).
+![For a 4 cell, the only region we can reliably know in 1 generation is the inner 2x2](assets/1-4cell_res.png)
 
-In general, if we have a $2^k$ cell, we can only speak with certainty about its
-$2^{k - 1}$ center after $2^{k - 2}$ iterations.
+Another neat fact is that there's not that many possible 4 cells, only $2^{16} =
+65536$ in fact! A fun trick here is that we can compute the next state of all 4
+cells. In fact we can store the result in an array where `arr[i]` is the
+resulting 2x2 for the 4 cell represented by the number `i` (recall that we can
+just store 4 cells as `u16`s, so it's just a number).
 
-## Re-using Computation
+The natural question to ask is: if we know how to compute the result of a 4 cell
+(its 2x2 center), how do we now compute the 4x4 result of an 8 cell? The goal
+here is to build up the induction needed to do this for any $2^k$ cell.
 
-TODO
+![So we know how to compute these centers...](assets/2-4cell_res2.png)
 
-## What makes Hashlife so efficient
+The way that we want to do this is in two phases. If somehow we could compute
+the center 6x6 of an 8 cell, we could then compute the resulting 4x4 center from
+*it*.
 
-## Notes
+![If only we could know these 2x2 regions, we would have a complete 6x6](assets/3-8cell_missing.png)
 
-- On an `n` cell, if we want to figure out its state in `k` iterations, the largest
-  knowable cell is an `n - 2k` cell.
-- A 4x4 cell is called a "rule".
-- A leaf cell is size 8x8. It's composed of a `u16` rule in all 4 of its quadrants.
-- Cells build up from the 8x8 as expected.
+Turns out we can actually compute this inner 6x6! All we need is to access the
+right 4x4 regions to produce the 2x2 results that we want.
+
+![With just a little re-framing, we can!](assets/4-reframe.png)
+
+This is great! At this point we have our 8 cell, and we know the inner 6 cell
+result.
+
+![So now we have this known 6x6 region after one generation...](assets/5-6cell_res.png)
+
+So now just one more phase of this clever 4x4 positioning, and we'll have the
+4 cell result for the 6 cell!
+
+![...and now we can use it to compute these 2x2 results from the sub 4x4s!](assets/6-sub4x4s.png)
+
+But the resulting 4 cell we're looking for is just doing that 4 times with the
+right 4x4s.
+
+![Do that 4 times, and you have the result for an 8 cell!](assets/7-8cell_res.png)
+
+So that's it! Now we have the 4 cell result of an 8 cell! But in fact we have
+more than that: this technique that we just used to produce the result of an 8
+cell works for *any* $2^k$ cell for $k > 2$. What this means is that we can just
+do this same trick again for 16 cells, 32 cells, and so on. We just completed
+our induction!
+
+One more thing to highlight on the example of the 8 cell. You'll notice that we
+did two result passes in the steps described above. The first set was to compute
+the inner 6x6, and the second was to compute the inner 4x4. This means that the
+result of an 8 cell is actually 2 generations ahead. In general this
+holds true. When we have a $2^k$ cell, we compute its $2^{k - 1}$ result which
+is $2^{k - 2}$ generations ahead. The proof of this is just induction.
+
+## Re-using Computation - What makes Hashlife so efficient
+
+Now we understand how to compute future world states in Hashlife, but how in the
+world is this meant to be fast? The beautiful thing about this algorithm is how
+prone it is to memoization. All the work we ever do is: we have a $2^k$ cell,
+and we want to compute its $2^{k - 1}$ result. Life is a deterministic game, if
+you have the same board state, you always get the same result. What this means
+is that we can cache the result of a cell so that we don't have to recompute it
+later! What's more, we can do this at any stage. That means: instead of
+recomputing that 512 cell each time, we just do it once (and along the way, we
+memo all the sub cells), and now we no longer have to do it again! This is where
+Hashlife goes from being an operationally heavy algorithm to crushing speed
+records.
+
+One more interesting small fact is that, if you apply the trick I described
+earlier by precomputing all the 4 cells ahead of time - a trick that this
+implementation uses - you're actually not even really computing *anything* at
+runtime! *Everything is just a lookup!*
 
 ## Optimization Ideas/Questions
 
@@ -71,7 +123,6 @@ TODO
   upper bound could allow us to pack more info in 4 words
 - SIMD on `256` bit register fits a cell in memory, could make ops faster?
 - How likely is it that parallelization would help here?
-- Should we use a `HashMap` instead of effectively making our own?
 
 ## TODO
 
@@ -93,10 +144,10 @@ TODO
   - [ ] Serialization
   - [x] Deserialization
 - [x] Slight cleanups & refactors
-- [ ] Add tests to attempt checking for correctness
-- [ ] Improve APIs around `read_rle`
+- [x] Add tests to attempt checking for correctness
+- [x] Improve APIs around `read_rle`
 - [ ] Add simple benchmarks
-- [ ] Add hashing
+- [x] Add hashing
 
 ## RLE format support checklist
 - [ ] Support `LifeHistory` rule & history states
