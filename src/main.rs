@@ -51,6 +51,7 @@ struct App {
     tick: Duration,
     /// Last drag position for computing deltas, None when not dragging
     drag_from: Option<(u16, u16)>,
+    iteration: i128,
 }
 
 impl App {
@@ -59,6 +60,7 @@ impl App {
             playing: false,
             tick: Duration::from_millis(50),
             drag_from: None,
+            iteration: 0,
         }
     }
 }
@@ -131,7 +133,9 @@ fn run(
                 }
                 Action::App(AppAction::Step) => {
                     app.playing = false;
+                    let k = if world.k() == 0 { world.depth - 3 } else { world.k() - 1 };
                     world.next();
+                    app.iteration += 1i128 << k;
                 }
 
                 Action::Camera(a) => match a {
@@ -167,7 +171,9 @@ fn run(
             }
         } else if app.playing {
             // Tick expired — advance the simulation
+            let k = if world.k() == 0 { world.depth - 3 } else { world.k() - 1 };
             world.next();
+            app.iteration += 1i128 << k;
         }
 
         cam.reset();
@@ -200,8 +206,7 @@ fn render(
     // Status bar on the last row
     let (x, y) = cam.position();
     let cols = terminal::size()?.0 as usize;
-    let play = if app.playing { "playing" } else { "paused" };
-    let left = format!("x: {}  y: {}  [{}]", x, y, play);
+    let left = format!("x: {}  y: {}  i: {}", x, y, app.iteration);
     let right = format!("s: {}  d: {}  k: {}", cam.scale(), world.depth, world.k());
     let padding = cols.saturating_sub(left.len() + right.len());
     let status = format!("{}{:padding$}{}", left, "", right);
