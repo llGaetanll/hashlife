@@ -25,8 +25,29 @@ of cells `2^k` on a side. To be more specific, a world that is `2^10 = 1024`
 cells on a side, can be decomposed as 4 cells `512` on a side. Each of those
 further decompose until we get back down to the 1 cell.
 
-In practice, HashLife does not start at the 1 cell but often at the 4 cell, as 4
-cells require 16 bits of information, they store perfectly inside `u16`s.
+In practice, we do not start at the 1 cell but at the 4 cell, as 4
+cells require exactly 16 bits of information, and store perfectly inside `u16`s.
+We then compose four `u16` "rules" to build a "leaf", or an 8 cell.
+
+## How Hashlife computes future world states
+
+So we understand how the algorithm stores the data, but so far we haven't at all
+explained how storing things this way allows us to compute Conway's Game of Life, let
+alone doing so efficiently.
+
+We start with our *rules* from earlier, the 4 cells. How can we compute the next state
+of this cell? The key observation to make is that, for a 4 cell, we can only
+really say anything about its 2x2 center, since the cells on the edges of the 4x4 
+depend on their neighbors, whose states we dont know. However the inner 2x2 we know for
+sure, we have all the neighbors needed to compute the next state.
+
+Another neat fact is that there's not that many possible 4 cells, only 2^16 in fact!
+A fun trick here is that we can compute the next state of all 4 cells. In fact we
+can store the result in an array where `arr[i]` is the resulting 2x2 for the 4 cell
+represented by the number `i` (recall that we can just store 4 cells as `u16`s).
+
+In general, if we have a $2^k$ cell, we can only speak with certainty about its
+$2^{k - 1}$ center after $2^{k - 2}$ iterations.
 
 ## Re-using Computation
 
