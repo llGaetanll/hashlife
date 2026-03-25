@@ -6,7 +6,46 @@ as input an array of cells, and compute the next state on that array. What makes
 Hashlife special is that it allows us to calculate many iterations in the
 future, sometimes at no cost at all.
 
-## How does it work?
+# Running the algorithm
+
+First, git clone the repo
+```
+git clone https://github.com/llGaetanll/hashlife && cd hashlife
+```
+
+Then, you'll need some RLE files to run it with. You can get a great collection
+of them [here](https://conwaylife.com/patterns/all.zip). The rle test suite
+can parse all 5000 or so of these files.
+
+Once you have your patterns, you can run the program with
+```
+cargo run --release -- <path/to/rlefile.rle>
+```
+
+This should open up a terminal live viewer with the pattern you loaded.
+
+## Controls
+- `<space>`: Toggle generation increment
+- `[`: Decrease `k`, the speed of generation (halves each time)
+- `]`: Increase `k`, the speed of generation (doubles each time)
+- `shift + j`: Zoom out
+- `shift + k`: Zoom in
+- `h`: Move left
+- `j`: Move down
+- `k`: Move up
+- `l`: Move right
+- `0`: Reset camera location
+
+**Note**: You can also use the mouse to scroll in and out for zooming as well as
+for panning. You can use the `s` value in the navbar to see your zoom level.
+
+**Note**: If you don't see the pattern you loaded immediately, zoom out a lot
+until you see a small dot, then zoom back in on it.
+
+**Note**: If your terminal doesn't support braille characters well, you can run
+the program with a `--camera block` parameter to switch the rendering style
+
+# How it works
 
 There are three parts to Hashlife that make it clever. The first is how we store
 the cells, the second is computing future world states, and the third is
