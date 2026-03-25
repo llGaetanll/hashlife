@@ -1,5 +1,7 @@
 # `hashlife`
 
+https://github.com/user-attachments/assets/029063b7-6db2-4712-9290-73109324a6f7
+
 [Hashlife](https://en.wikipedia.org/wiki/Hashlife) is a program that efficiently
 computes Conway's Game of Life in large universes. A simple program might take
 as input an array of cells, and compute the next state on that array. What makes
