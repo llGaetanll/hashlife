@@ -51,6 +51,24 @@ impl Default for RuleSet {
     }
 }
 
+impl std::fmt::Display for RuleSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "b")?;
+        for i in 0..9 {
+            if (self.rule >> (16 + i)) & 1 != 0 {
+                write!(f, "{}", i)?;
+            }
+        }
+        write!(f, "/s")?;
+        for i in 0..9 {
+            if (self.rule >> i) & 1 != 0 {
+                write!(f, "{}", i)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl std::fmt::Debug for RuleSet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut rule_str = String::from("b");

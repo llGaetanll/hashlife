@@ -7,9 +7,12 @@ use std::time::Duration;
 use clap::{Parser, ValueEnum};
 use crossterm::{cursor, event, execute, style, terminal};
 
+use std::path::Path;
+
 use hashlife::camera::{Camera, CameraBlock, CameraBraille};
 use hashlife::rle_data::RleBuffer;
 use hashlife::rle_file;
+use hashlife::rule_set::RuleSet;
 use hashlife::world::World;
 
 use action::{Action, AppAction, CameraAction};
@@ -30,11 +33,12 @@ struct Args {
     camera: CameraArg,
 }
 
-fn load_rle(path: &str) -> anyhow::Result<World> {
+fn load_rle(path: &str) -> anyhow::Result<(World, RuleSet)> {
     let bytes = std::fs::read(path)?;
     let mut buf = RleBuffer::new();
     let header = rle_file::read_rle(&bytes, &mut buf)?;
-    Ok(World::from_rle(header.set, buf))
+    let set = header.set.clone();
+    Ok((World::from_rle(header.set, buf), set))
 }
 
 fn make_camera(ty: &CameraArg, cols: u16, rows: u16) -> Box<dyn Camera> {
@@ -52,15 +56,19 @@ struct App {
     /// Last drag position for computing deltas, None when not dragging
     drag_from: Option<(u16, u16)>,
     iteration: i128,
+    rule_set: RuleSet,
+    file_name: String,
 }
 
 impl App {
-    fn new() -> Self {
+    fn new(rule_set: RuleSet, file_name: String) -> Self {
         Self {
             playing: false,
             tick: Duration::from_millis(50),
             drag_from: None,
             iteration: 0,
+            rule_set,
+            file_name,
         }
     }
 }
@@ -68,10 +76,15 @@ impl App {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let mut world = load_rle(&args.path)?;
+    let (mut world, rule_set) = load_rle(&args.path)?;
     world.grow(2);
     let (cols, rows) = terminal::size()?;
     let mut cam = make_camera(&args.camera, cols, rows);
+
+    let file_name = Path::new(&args.path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| args.path.clone());
 
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -82,7 +95,7 @@ fn main() -> anyhow::Result<()> {
         event::EnableMouseCapture,
     )?;
 
-    let mut app = App::new();
+    let mut app = App::new(rule_set, file_name);
 
     // Initial draw
     cam.reset();
@@ -214,7 +227,7 @@ fn render(
     // Status bar on the last row
     let (x, y) = cam.position();
     let cols = terminal::size()?.0 as usize;
-    let left = format!("x: {}  y: {}  i: {}", x, y, app.iteration);
+    let left = format!("{}  {}  x: {}  y: {}  i: {}", app.rule_set, app.file_name, x, y, app.iteration);
     let right = format!("s: {}  d: {}  k: {}", cam.scale(), world.depth, world.k());
     let padding = cols.saturating_sub(left.len() + right.len());
     let status = format!("{}{:padding$}{}", left, "", right);
