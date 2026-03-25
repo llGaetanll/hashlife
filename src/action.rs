@@ -7,6 +7,8 @@ pub enum AppAction {
     Quit,
     TogglePlay,
     Step,
+    IncreaseK,
+    DecreaseK,
 }
 
 pub enum CameraAction {

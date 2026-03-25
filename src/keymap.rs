@@ -93,6 +93,16 @@ fn resolve_key(key: KeyEvent) -> Option<Action> {
             ..
         } => Some(Action::App(AppAction::Step)),
 
+        KeyEvent {
+            code: KeyCode::Char(']'),
+            ..
+        } => Some(Action::App(AppAction::IncreaseK)),
+
+        KeyEvent {
+            code: KeyCode::Char('['),
+            ..
+        } => Some(Action::App(AppAction::DecreaseK)),
+
         _ => None,
     }
 }

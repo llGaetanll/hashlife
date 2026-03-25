@@ -137,6 +137,14 @@ fn run(
                     world.next();
                     app.iteration += 1i128 << k;
                 }
+                Action::App(AppAction::IncreaseK) => {
+                    world.set_k(world.k() + 1);
+                }
+                Action::App(AppAction::DecreaseK) => {
+                    if world.k() > 1 {
+                        world.set_k(world.k() - 1);
+                    }
+                }
 
                 Action::Camera(a) => match a {
                     CameraAction::MoveUp => cam.move_up(1),
