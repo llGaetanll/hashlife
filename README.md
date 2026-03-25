@@ -14,7 +14,7 @@ later but let's first talk about how the cells are stored.
 
 ## How Hashlife stores the cells
 
-If you were to build a very simple prgram to compute Conway's game of life, it
+If you were to build a very simple program to compute Conway's game of life, it
 might seem natural to store the cells as a 2D array of boolean values. Cell `(x,
 y)` is alive if and only if `cells[x][y]` is `true`. Hashlife does not take this
 approach. Instead, Hashlife builds the world from increasingly large square
